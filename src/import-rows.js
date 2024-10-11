@@ -55,15 +55,17 @@ function processFile(file) {
     const namespace = match[2];
     const modulePath = match[3];
 
-    // Check if the module is part of the local modules
-    const local = localModules.has(modulePath);
+    // Check if the module is part of the local 
+
+    const goodPath = modulePath.startsWith('/') ? modulePath : `${path.dirname(fileName).replace('ml-modules/root', '')}/${modulePath}`
+    const local = localModules.has(goodPath);
 
     csvRows.push({
       abbrev,
       namespace,
-      path: modulePath,
+      path: goodPath,
       client: fileName.replace('ml-modules/root', ''),
-      local: local ? 'true' : 'false'
+      local: local ? 'true' : (goodPath.startsWith('/MarkLogic') ? 'internal' : 'false') 
     });
   }
 
