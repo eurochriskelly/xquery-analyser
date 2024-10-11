@@ -5,20 +5,52 @@ ts=$(date +%s)
 tdir=tmp/xqanalyze/$ts
 
 main() {
+  rm -rf tmp
   echo making temp dir $tdir
   mkdir -p $tdir
   ls /tmp/xqanalyze
-  git ls-files | grep "\.xqy$" > $tdir/xqyfiles.txt
-  echo "Found the following module namespaces:"
-  check_for_import_names|sort|uniq -c|while read count name; do
-    echo " $name ($count instances)"
-  done
+  git ls-files | grep "\.xqy$" >$tdir/xqyfiles.txt
+  check_for_import_names
+  generate_import_db
+  import_to_sqlite
   echo "Found $(wc -l $tdir/xqyfiles.txt) xquery files"
 }
 
-check_for_import_names() {
+import_to_sqlite() {
+  echo "Importing to sqlite"
+  sqlite3 $tdir/xqy.db <<EOF
+CREATE TABLE xqyfiles (
+  id INTEGER PRIMARY KEY,
+  filename TEXT
+);
+
+}
+
+generate_import_db() {
+  echo "Generating import database"
+  local index=0
+  local with_header="--with-header=true"
   for f in $(cat $tdir/xqyfiles.txt); do
-    cat $f | grep "^module namespace" | awk '{print $3}'
+    node $REPO_DIR/src/import-rows.js \
+      --file-name=$f \
+      --input-list=$tdir/xqyfiles.txt \
+      $with_header \
+      >>$tdir/out.csv
+    with_header=""
+  done
+  echo "preview of output"
+  head -n 8 $tdir/out.csv
+}
+
+check_for_import_names() {
+  getmods() {
+    for f in $(cat $tdir/xqyfiles.txt); do
+      cat $f | grep "^module namespace" | awk '{print $3}' | awk -F= '{print $1}'
+    done
+  }
+  echo "Found the following module namespaces:"
+  getmods | sort | uniq -c | while read count name; do
+    echo "  $name ($count instances)"
   done
 }
 
