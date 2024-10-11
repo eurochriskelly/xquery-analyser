@@ -1,0 +1,25 @@
+#!/bin/bash
+export REPO_DIR="@@REPO_DIR@@"
+
+ts=$(date +%s)
+tdir=tmp/xqanalyze/$ts
+
+main() {
+  echo making temp dir $tdir
+  mkdir -p $tdir
+  ls /tmp/xqanalyze
+  git ls-files | grep "\.xqy$" > $tdir/xqyfiles.txt
+  echo "Found the following module namespaces:"
+  check_for_import_names|sort|uniq -c|while read count name; do
+    echo " $name ($count instances)"
+  done
+  echo "Found $(wc -l $tdir/xqyfiles.txt) xquery files"
+}
+
+check_for_import_names() {
+  for f in $(cat $tdir/xqyfiles.txt); do
+    cat $f | grep "^module namespace" | awk '{print $3}'
+  done
+}
+
+main "$@"
