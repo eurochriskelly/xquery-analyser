@@ -5,21 +5,83 @@ ts=$(date +%s)
 tdir=tmp/xqanalyze/$ts
 
 main() {
+  rm -rf tmp
   echo making temp dir $tdir
   mkdir -p $tdir
   ls /tmp/xqanalyze
-  git ls-files | grep "\.xqy$" > $tdir/xqyfiles.txt
-  echo "Found the following module namespaces:"
-  check_for_import_names|sort|uniq -c|while read count name; do
-    echo " $name ($count instances)"
+  git ls-files | grep "\.xqy$" >$tdir/xqyfiles.txt
+  check_for_import_names
+  generate_import_db
+  ingest_csv_to_sqlite $tdir/out.csv $tdir/xqy.sqlite xqy_imports
+  hh "Found $(wc -l $tdir/xqyfiles.txt) xquery files"
+}
+
+# Function to ingest CSV into SQLite
+ingest_csv_to_sqlite() {
+  hh "Ingesting CSV into SQLite"
+  local csv_file=$1
+  local db_file=$2
+  local table_name=$3
+
+  # Check if the CSV file exists
+  if [[ ! -f "$csv_file" ]]; then
+    echo "CSV file '$csv_file' does not exist."
+    return 1
+  fi
+
+  # Check if the database file exists, if not, create it
+  if [[ ! -f "$db_file" ]]; then
+    echo "Database file '$db_file' does not exist, creating new database..."
+    sqlite3 "$db_file" "VACUUM;"
+  fi
+
+  # Create the table structure based on CSV columns (assuming header row)
+  sqlite3 "$db_file" <<EOF
+CREATE TABLE IF NOT EXISTS $table_name (
+    abbrev TEXT,
+    namespace TEXT,
+    path TEXT,
+    client TEXT,
+    local TEXT
+);
+EOF
+
+  # Import the CSV data into the table (ignoring the first row - the header)
+  sqlite3 -separator ',' "$db_file" ".import '$csv_file' $table_name"
+
+  echo "Data successfully ingested into '$db_file' table '$table_name'."
+}
+
+generate_import_db() {
+  hh "Generating import database"
+  local index=0
+  local with_header="--with-header=true"
+  for f in $(cat $tdir/xqyfiles.txt); do
+    node $REPO_DIR/src/import-rows.js \
+      --file-name=$f \
+      --input-list=$tdir/xqyfiles.txt \
+      $with_header \
+      >>$tdir/out.csv
+    with_header=""
   done
-  echo "Found $(wc -l $tdir/xqyfiles.txt) xquery files"
+  echo "preview of output"
+  head -n 3 $tdir/out.csv
+  hh "Total imports: $(wc -l $tdir/out.csv)"
 }
 
 check_for_import_names() {
-  for f in $(cat $tdir/xqyfiles.txt); do
-    cat $f | grep "^module namespace" | awk '{print $3}'
+  getmods() {
+    for f in $(cat $tdir/xqyfiles.txt); do
+      cat $f | grep "^module namespace" | awk '{print $3}' | awk -F= '{print $1}'
+    done
+  }
+  hh "Found the following module namespaces:"
+  getmods | sort | uniq -c | while read count name; do
+    echo "  $name ($count instances)"
   done
 }
-
+# Create a function to print a message in red with a timestamp prepended
+hh() {
+  echo -e "\033[31m$(date +%H:%M:%S) $1\033[0m"
+}
 main "$@"
