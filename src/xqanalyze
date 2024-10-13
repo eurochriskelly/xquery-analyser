@@ -6,31 +6,65 @@ tdir=tmp/xqanalyze/$ts
 
 main() {
   echo "Running xqanalyze"
-  echo "$@"
+
+  option="import_checks"
   case $1 in
   --extract-functions | -x)
-    echo "Extracting functions"
-    if [ -z "$2" ]; then
-      echo "Please provide a file name"
+    option=extract_functions
+    if [ ! -f $2 ]; then
+      echo "File $2 does not exist"
       exit 1
     fi
-    extract_functions $2
+    file=$2
     ;;
 
-  "*")
-    rm -rf tmp
-    echo making temp dir $tdir
-    mkdir -p $tdir
-    ls /tmp/xqanalyze
-    git ls-files | grep "\.xqy$" >$tdir/xqyfiles.txt
-    check_for_import_names
-    generate_import_db
-    ingest_csv_to_sqlite $tdir/out.csv $tdir/xqy.sqlite xqy_imports
-    hh "Found $(wc -l $tdir/xqyfiles.txt) xquery files"
+  --extract-all-functions | -a)
+    echo "ok"
+    option=extract_all_functions
     ;;
+
+  "*") ;;
   esac
+  echo "Option: $option"
+
+  # Run the function matching the selected option
+  $option $file
 }
 
+extract_all_functions() {
+  echo "Extracting all functions"
+  gen_file_list
+  for f in $(cat $tdir/xqyfiles.txt | head -n 1); do
+    node $REPO_DIR/src/extract-functions.js \
+      --file-name=$f \
+      --out-dir=$tdir
+    with_header=""
+  done
+  echo "preview of output"
+  read x
+}
+
+extract_functions() {
+  echo "Extracting functions"
+  local file=$1
+  node $REPO_DIR/src/extract-functions.js --file-name=$file
+}
+
+import_checks() {
+  gen_file_list
+  check_for_import_names
+  generate_import_db
+  ingest_csv_to_sqlite $tdir/out.csv $tdir/xqy.sqlite xqy_imports
+  hh "Found $(wc -l $tdir/xqyfiles.txt) xquery files"
+}
+
+gen_file_list() {
+  echo making temp dir $tdir
+  test -d tmp && rm -rf tmp
+  mkdir -p $tdir
+  ls /tmp/xqanalyze
+  git ls-files | grep "\.xqy$" >$tdir/xqyfiles.txt
+}
 extract_functions() {
   local file=$1
   node $REPO_DIR/src/extract-functions.js --file-name=$file
