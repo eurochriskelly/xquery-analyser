@@ -27,15 +27,8 @@ function removeComments(str) {
 
 content = removeComments(content);
 
-// Step 2: Consider content starting from the first declare function statement
-const declareFunctionIndex = content.indexOf('declare function');
-if (declareFunctionIndex === -1) {
-    console.error('No functions found in the file.');
-    process.exit(1);
-}
-
-// Extract namespace declaration
-const namespaceRegex = /module\s+namespace\s+(\w+)\s*=\s*"([^"]+)"\s*;/;
+// Extract module namespace declaration
+const namespaceRegex = /module\s+namespace\s+["']?(\w+)["']?\s*=\s*"([^"]+)"\s*;/;
 const namespaceMatch = content.match(namespaceRegex);
 if (!namespaceMatch) {
     console.error('No module namespace declaration found.');
@@ -43,6 +36,34 @@ if (!namespaceMatch) {
 }
 const namespacePrefix = namespaceMatch[1];
 const namespaceURI = namespaceMatch[2];
+
+// Extract imported modules
+const imports = [];
+const importRegex = /import\s+module\s+namespace\s+[\s\S]*?;/gm;
+let importMatch;
+while ((importMatch = importRegex.exec(content)) !== null) {
+    const importStatement = importMatch[0];
+
+    // Extract prefix and URI from the import statement
+    const importDetailsRegex = /namespace\s+["']?(\w+)["']?\s*=\s*"([^"]+)"(?:\s+at\s+"[^"]+")?\s*;/;
+    const detailsMatch = importStatement.match(importDetailsRegex);
+
+    if (detailsMatch) {
+        imports.push({
+            namespace: {
+                prefix: detailsMatch[1],
+                uri: detailsMatch[2]
+            }
+        });
+    }
+}
+
+// Step 2: Consider content starting from the first declare function statement
+const declareFunctionIndex = content.indexOf('declare function');
+if (declareFunctionIndex === -1) {
+    console.error('No functions found in the file.');
+    process.exit(1);
+}
 
 // Content to be processed (starting from the first declare function)
 content = content.substring(declareFunctionIndex);
@@ -89,6 +110,7 @@ const result = {
         uri: namespaceURI,
         prefix: namespacePrefix
     },
+    imports: imports,
     functions: functions
 };
 
