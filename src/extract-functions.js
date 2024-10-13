@@ -1,13 +1,14 @@
 const fs = require('fs');
 const path = require('path');
+let offset = 0;
 
 function main() {
     const fileName = parseArguments();
     let content = readFile(fileName);
     content = removeComments(content);
 
-    const namespace = extractNamespace(content);
-    const imports = extractImports(content);
+    const namespace = extractNamespace(content, fileName);
+    const imports = extractImports(content, fileName);
     const relevantPrefixes = collectRelevantPrefixes(namespace.prefix, imports);
 
     const functions = extractFunctions(content, relevantPrefixes, namespace.prefix);
@@ -48,7 +49,7 @@ function removeComments(content) {
     return content.replace(/\(\:[\s\S]*?\:\)/g, '');
 }
 
-function extractNamespace(content) {
+function extractNamespace(content, filePath) {
     const namespaceRegex = /module\s+namespace\s+["']?(\w+)["']?\s*=\s*"([^"]+)"\s*;/;
     const namespaceMatch = content.match(namespaceRegex);
     if (!namespaceMatch) {
@@ -59,26 +60,33 @@ function extractNamespace(content) {
     const namespaceURI = namespaceMatch[2];
     return {
         prefix: namespacePrefix,
-        uri: namespaceURI
+        uri: namespaceURI,
+        filePath: filePath.replace('./ml-modules/root', '')
     };
 }
 
-function extractImports(content) {
+function extractImports(content, filePath) {
     const imports = [];
     const importRegex = /import\s+module\s+namespace\s+[\s\S]*?;/gm;
     let importMatch;
     while ((importMatch = importRegex.exec(content)) !== null) {
         const importStatement = importMatch[0];
 
-        // Extract prefix and URI from the import statement
-        const importDetailsRegex = /namespace\s+["']?(\w+)["']?\s*=\s*"([^"]+)"(?:\s+at\s+"[^"]+")?\s*;/;
+        // Extract prefix, URI, and filePath from the import statement
+        const importDetailsRegex = /namespace\s+["']?(\w+)["']?\s*=\s*"([^"]+)"(?:\s+at\s+"([^"]+)")?\s*;/;
         const detailsMatch = importStatement.match(importDetailsRegex);
+
+        const pathParts = detailsMatch[3].split('/');
+        const usePath = pathParts.length === 1
+            ? path.dirname(filePath).replace('./ml-modules/root', '') + '/' + detailsMatch[3]
+            : detailsMatch[3] || null;
 
         if (detailsMatch) {
             imports.push({
                 namespace: {
                     prefix: detailsMatch[1],
-                    uri: detailsMatch[2]
+                    uri: detailsMatch[2],
+                    filePath: usePath
                 }
             });
         }
@@ -131,7 +139,7 @@ function extractFunctions(content, relevantPrefixes, namespacePrefix) {
 
         functions.push({
             name: functionName,
-            line: linesBeforeFunction,
+            line: offset + linesBeforeFunction,
             signature: signature,
             body: body,
             invocations: invocations
@@ -139,6 +147,7 @@ function extractFunctions(content, relevantPrefixes, namespacePrefix) {
 
         // Remove the function from content
         content = content.substring(match.index + match[0].length);
+        offset += match.index + match[0].length;
         // Reset the regex lastIndex to start from the beginning of the updated content
         functionRegex.lastIndex = 0;
     }
