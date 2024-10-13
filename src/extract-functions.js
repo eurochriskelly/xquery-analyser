@@ -58,6 +58,12 @@ while ((importMatch = importRegex.exec(content)) !== null) {
     }
 }
 
+// Collect relevant prefixes (module's own prefix and imported prefixes)
+const relevantPrefixes = new Set([namespacePrefix]);
+imports.forEach(imp => {
+    relevantPrefixes.add(imp.namespace.prefix);
+});
+
 // Step 2: Consider content starting from the first declare function statement
 const declareFunctionIndex = content.indexOf('declare function');
 if (declareFunctionIndex === -1) {
@@ -90,11 +96,38 @@ while ((match = functionRegex.exec(content)) !== null) {
     // Calculate line number (approximate)
     const linesBeforeFunction = content.substring(0, match.index).split('\n').length;
 
+    // Extract invocations from the function body
+    const invocations = {};
+    const invocationRegex = /(?<!\$)\b([a-zA-Z_][\w\-\.]*)\:([a-zA-Z_][\w\-\.]*)(?:\#\d+)?(?=\s*\(|\#\d+)/g;
+    let invocationMatch;
+    while ((invocationMatch = invocationRegex.exec(body)) !== null) {
+        const prefix = invocationMatch[1];
+        const funcName = invocationMatch[2];
+        const arityMatch = body.substr(invocationMatch.index).match(/#(\d+)/);
+        const arity = arityMatch ? `#${arityMatch[1]}` : '';
+
+        // Only include relevant prefixes
+        if (relevantPrefixes.has(prefix)) {
+            const fullFunctionName = funcName + arity;
+            if (!invocations[prefix]) {
+                invocations[prefix] = new Set();
+            }
+            invocations[prefix].add(fullFunctionName);
+        }
+    }
+
+    // Convert invocation sets to arrays
+    const invocationsObj = {};
+    for (const [prefix, funcSet] of Object.entries(invocations)) {
+        invocationsObj[prefix] = Array.from(funcSet);
+    }
+
     functions.push({
         name: functionName,
         line: linesBeforeFunction,
         signature: signature,
-        body: body
+        body: body,
+        invocations: invocationsObj
     });
 
     // Remove the function from content
@@ -115,4 +148,4 @@ const result = {
 };
 
 // Output the result
-console.log(JSON.stringify(result, null, 4));
+//console.log(JSON.stringify(result, null, 4));
