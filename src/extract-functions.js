@@ -3,7 +3,7 @@ const path = require('path');
 let offset = 0;
 
 function main() {
-    const fileName = parseArguments();
+    const [fileName, outDir] = parseArguments();
     let content = readFile(fileName);
     content = removeComments(content);
 
@@ -15,12 +15,18 @@ function main() {
 
     const result = {
         file: path.basename(fileName),
+        path: path.dirname(fileName).replace('./ml-modules/root', ''),
         namespace: namespace,
         imports: imports,
         functions: functions
     };
 
-    console.log(JSON.stringify(result, null, 4));
+    if (outDir) {
+        const outFileName = path.join(outDir, fileName.replace(/\//g, '_') + '.json');
+        fs.writeFileSync(outFileName, JSON.stringify(result, null, 4));
+    } else {
+        console.log(JSON.stringify(result, null, 4));
+    }
 }
 
 function parseArguments() {
@@ -31,7 +37,10 @@ function parseArguments() {
         process.exit(1);
     }
     const fileName = fileNameArg.split('=')[1];
-    return fileName;
+    const outDirArg = args.find(arg => arg.startsWith('--out-dir='));
+    const outDir = outDirArg ? outDirArg.split('=')[1] : null;
+
+    return [fileName, outDir];
 }
 
 function readFile(fileName) {
@@ -75,8 +84,19 @@ function extractImports(content, filePath) {
         // Extract prefix, URI, and filePath from the import statement
         const importDetailsRegex = /namespace\s+["']?(\w+)["']?\s*=\s*"([^"]+)"(?:\s+at\s+"([^"]+)")?\s*;/;
         const detailsMatch = importStatement.match(importDetailsRegex);
+       
+        if (!detailsMatch) {
+            imports.push({
+                namespace: {
+                    prefix: null,
+                    uri: null,
+                    filePath: null 
+                }
+            });
+            return
+        }
 
-        const pathParts = detailsMatch[3].split('/');
+        const pathParts = detailsMatch[3]?.split('/');
         const usePath = pathParts.length === 1
             ? path.dirname(filePath).replace('./ml-modules/root', '') + '/' + detailsMatch[3]
             : detailsMatch[3] || null;
@@ -96,7 +116,7 @@ function extractImports(content, filePath) {
 
 function collectRelevantPrefixes(namespacePrefix, imports) {
     const relevantPrefixes = new Set([namespacePrefix]);
-    imports.forEach(imp => {
+    imports?.forEach(imp => {
         relevantPrefixes.add(imp.namespace.prefix);
     });
     return relevantPrefixes;
