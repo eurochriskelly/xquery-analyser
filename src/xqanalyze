@@ -104,6 +104,11 @@ EOF
   sqlite3 -separator ',' "$db_file" ".import '$csv_file' $table_name"
 
   echo "Data successfully ingested into '$db_file' table '$table_name'."
+  echo "Open with sqlitestudio? (y/n)"
+  read x
+  if [ "$x" == "y" ]; then
+    sqlitestudio $db_file
+  fi
 }
 
 generate_import_db() {
