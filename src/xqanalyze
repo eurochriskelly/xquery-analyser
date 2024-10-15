@@ -34,14 +34,12 @@ main() {
 extract_all_functions() {
   echo "Extracting all functions"
   gen_file_list
-  for f in $(cat $tdir/xqyfiles.txt | head -n 1); do
+  for f in $(cat $tdir/xqyfiles.txt); do
+    echo "Proccsing file: $f"
     node $REPO_DIR/src/extract-functions.js \
       --file-name=$f \
       --out-dir=$tdir
-    with_header=""
   done
-  echo "preview of output"
-  read x
 }
 
 extract_functions() {
