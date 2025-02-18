@@ -19,11 +19,10 @@ main() {
     ;;
 
   --extract-all-functions | -a)
-    echo "ok"
     option=extract_all_functions
     ;;
 
-  "*") ;;
+  --import-checks | "*") ;;
   esac
   echo "Option: $option"
 
@@ -35,7 +34,7 @@ extract_all_functions() {
   echo "Extracting all functions"
   gen_file_list
   for f in $(cat $tdir/xqyfiles.txt); do
-    echo "Proccsing file: $f"
+    echo "Processing file: $f"
     node $REPO_DIR/src/extract-functions.js \
       --file-name=$f \
       --out-dir=$tdir
@@ -58,9 +57,10 @@ import_checks() {
 
 gen_file_list() {
   echo making temp dir $tdir
-  test -d tmp && rm -rf tmp
+  if [ -d $tdir ]; then
+    rm -rf $tdir
+  fi
   mkdir -p $tdir
-  ls /tmp/xqanalyze
   git ls-files | grep "\.xqy$" >$tdir/xqyfiles.txt
 }
 extract_functions() {

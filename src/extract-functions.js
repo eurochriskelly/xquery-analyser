@@ -122,58 +122,41 @@ function collectRelevantPrefixes(namespacePrefix, imports) {
     return relevantPrefixes;
 }
 
-function extractFunctions(content, relevantPrefixes, namespacePrefix) {
-    const functions = [];
+function extractInvocations(body, relevantPrefixes, namespace) {
+    const invocations = {};
+    const invocationRegex = /(?<!\$)\b([a-zA-Z_][\w\-\.]*)\:([a-zA-Z_][\w\-\.]*)(?:\#\d+)?(?=\s*\(|\#\d+)/g;
+    let invocationMatch;
 
-    // Step 2: Consider content starting from the first declare function statement
-    const declareFunctionIndex = content.indexOf('declare function');
-    if (declareFunctionIndex === -1) {
-        console.error('No functions found in the file.');
-        process.exit(1);
-    }
+    while ((invocationMatch = invocationRegex.exec(body)) !== null) {
+        const prefix = invocationMatch[1];  // Extracts "my"
+        const funcName = invocationMatch[2]; // Extracts "get-foo-bar"
+        const arityMatch = body.substr(invocationMatch.index).match(/#(\d+)/);
+        const arity = arityMatch ? `#${arityMatch[1]}` : '';
 
-    // Content to be processed (starting from the first declare function)
-    content = content.substring(declareFunctionIndex);
-
-    const functionRegex = /declare function\s+[\s\S]*?\{[\s\S]*?\};/gm;
-    let match;
-    while ((match = functionRegex.exec(content)) !== null) {
-        const functionText = match[0];
-
-        // Extract the function signature and body
-        const signatureMatch = functionText.match(/declare function\s+([\s\S]*?)\s*\{/);
-        const signature = signatureMatch ? signatureMatch[1].trim() : '';
-
-        const bodyMatch = functionText.match(/\{([\s\S]*?)\};/s);
-        const body = bodyMatch ? bodyMatch[1].trim() : '';
-
-        // Extract function name
-        const nameMatch = signature.match(new RegExp(`${namespacePrefix}:(\\w+)`));
-        const functionName = nameMatch ? nameMatch[1] : '';
-
-        // Calculate line number (approximate)
-        const linesBeforeFunction = content.substring(0, match.index).split('\n').length;
-
-        // Extract invocations from the function body
-        const invocations = extractInvocations(body, relevantPrefixes);
-
-        functions.push({
-            name: functionName,
-            line: offset + linesBeforeFunction,
-            signature: signature,
-            body: body,
-            invocations: invocations
+        // Lookup the full namespace URI using the prefix
+        let namespaceURI = namespace.uri; // Default to the module's own namespace
+        relevantPrefixes.forEach(imp => {
+            if (imp.prefix === prefix) {
+                namespaceURI = imp.uri; // Use imported namespace if matched
+            }
         });
 
-        // Remove the function from content
-        content = content.substring(match.index + match[0].length);
-        offset += match.index + match[0].length;
-        // Reset the regex lastIndex to start from the beginning of the updated content
-        functionRegex.lastIndex = 0;
+        // Store the invocation under the full namespace
+        if (!invocations[namespaceURI]) {
+            invocations[namespaceURI] = new Set();
+        }
+        invocations[namespaceURI].add(funcName + arity);
     }
 
-    return functions;
+    // Convert sets to arrays
+    const invocationsObj = {};
+    for (const [ns, funcSet] of Object.entries(invocations)) {
+        invocationsObj[ns] = Array.from(funcSet);
+    }
+
+    return invocationsObj;
 }
+
 
 function extractInvocations(body, relevantPrefixes) {
     const invocations = {};
