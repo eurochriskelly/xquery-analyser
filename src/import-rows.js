@@ -1,11 +1,8 @@
 const fs = require('fs');
-const path = require('path');
-const readline = require('readline');
 
 // Command-line arguments parsing
 const args = process.argv.slice(2);
-let fileName, inputList;
-
+let fileName;
 let withHeader = false;
 
 args.forEach(arg => {
@@ -13,9 +10,6 @@ args.forEach(arg => {
   switch (key) {
     case '--file-name':
       fileName = value;
-      break;
-    case '--input-list':
-      inputList = value;
       break;
     case '--with-header':
       withHeader = value === 'true';
@@ -25,32 +19,24 @@ args.forEach(arg => {
   }
 });
 
-if (!fileName || !inputList) {
-  console.error('Error: Please provide --file-name and --input-list arguments');
+if (!fileName) {
+  console.error('Error: Please provide --file-name argument');
   process.exit(1);
 }
 
-// Read the list of local modules from input list
-const localModules = new Set();
-const rl = readline.createInterface({
-  input: fs.createReadStream(inputList),
-  crlfDelay: Infinity
-});
-
-rl.on('line', (line) => {
-  localModules.add(line.trim().replace('ml-modules/root', ''));
-}).on('close', () => {
-  processFile(fileName);
-});
+processFile(fileName);
 
 function processFile(file) {
   const xqyData = fs.readFileSync(file, 'utf8');
   const data = JSON.parse(xqyData);
 
+
+  const filename = data.path.split('root').pop() + '/' +  data.file;
   // --- Namespaces ---
   const nsRows = [];
   if (data.namespace) {
     nsRows.push({
+      filename,
       file: data.file,
       prefix: data.namespace.prefix,
       uri: data.namespace.uri,
@@ -60,6 +46,7 @@ function processFile(file) {
   if (data.imports) {
     data.imports.forEach(imp => {
       nsRows.push({
+        filename,
         file: data.file,
         prefix: imp.namespace.prefix,
         uri: imp.namespace.uri,
@@ -67,7 +54,7 @@ function processFile(file) {
       });
     });
   }
-  outputCSV(nsRows, ['file','prefix','uri','filePath'], 'namespaces.csv');
+  outputCSV(nsRows, ['filename', 'file','prefix','uri','filePath'], '/tmp/xqanalyze/namespaces.csv');
 
   // --- Functions, Invocations & Parameters ---
   const funcRows = [];
@@ -76,15 +63,16 @@ function processFile(file) {
   if (data.functions) {
     data.functions.forEach(func => {
       funcRows.push({
+        filename, 
         file: data.file,
         name: func.name,
         line: func.line,
-        signature: func.signature
       });
       if (func.invocations) {
         Object.entries(func.invocations).forEach(([modUri, funcs]) => {
           funcs.forEach(invFunc => {
             invocRows.push({
+              filename,
               file: data.file,
               caller: func.name,
               invoked_module: modUri,
@@ -96,6 +84,7 @@ function processFile(file) {
       if (func.parameters) {
         Object.entries(func.parameters).forEach(([param, type]) => {
           paramRows.push({
+            filename,
             file: data.file,
             function_name: func.name,
             parameter: param,
@@ -105,9 +94,9 @@ function processFile(file) {
       }
     });
   }
-  outputCSV(funcRows, ['file','name','line','signature'], 'functions.csv');
-  outputCSV(invocRows, ['file','caller','invoked_module','invoked_function'], 'invocations.csv');
-  outputCSV(paramRows, ['file','function_name','parameter','type'], 'parameters.csv');
+  outputCSV(funcRows, ['filename', 'file','name','line'], '/tmp/xqanalyze/functions.csv');
+  outputCSV(invocRows, ['filename', 'file','caller','invoked_module','invoked_function'], '/tmp/xqanalyze/invocations.csv');
+  outputCSV(paramRows, ['filename', 'file','function_name','parameter','type'], '/tmp/xqanalyze/parameters.csv');
 }
 
 function outputCSV(rows, columns, outFile) {

@@ -34,6 +34,9 @@ main() {
 
 extract_all_functions() {
   echo "Extracting all functions"
+  if [ -d "$tdir" ]; then rm -rf $tdir;fi
+  echo "Making temp dir $tdir"
+  mkdir -p $tdir
   gen_file_list
   for f in $(cat $tdir/xqyfiles.txt); do
     echo "Processing file: $f"
@@ -51,6 +54,7 @@ extract_functions() {
 
 import_checks() {
   gen_file_list
+  rm /tmp/xqanalyze/*.csv
   check_for_import_names
   generate_import_db
   ingest_csv_to_sqlite $tdir/out.csv $tdir/xqy.sqlite xqy_imports
@@ -93,9 +97,6 @@ EOF
 }
 
 gen_file_list() {
-  if [ -d "$tdir" ]; then rm -rf $tdir;fi
-  echo "Making temp dir $tdir"
-  mkdir -p $tdir
   git ls-files | grep "\.xqy$" >$tdir/xqyfiles.txt
 }
 extract_functions() {
@@ -148,17 +149,21 @@ generate_import_db() {
   hh "Generating import database"
   local index=0
   local with_header="--with-header=true"
-  for f in $(cat $tdir/xqyfiles.txt); do
+  local out=/tmp/xqanalyze/out.csv
+
+  for f in $(find /tmp/xqanalyze/ -name "*.json"|head -n 4); do
+    echo "Processing file: $f"
+    set -o xtrace
     node $REPO_DIR/src/import-rows.js \
       --file-name=$f \
-      --input-list=$tdir/xqyfiles.txt \
       $with_header \
-      >>$tdir/out.csv
+      >> $out
+    set +o xtrace
     with_header=""
   done
   echo "preview of output"
-  head -n 3 $tdir/out.csv
-  hh "Total imports: $(wc -l $tdir/out.csv)"
+  head -n 3 /tmp/xqanalyze/out.csv
+  hh "Total imports: $(wc -l $out)"
 }
 
 check_for_import_names() {
