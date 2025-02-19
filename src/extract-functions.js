@@ -122,39 +122,58 @@ function collectRelevantPrefixes(namespacePrefix, imports) {
     return relevantPrefixes;
 }
 
-function extractInvocations(body, relevantPrefixes, namespace) {
-    const invocations = {};
-    const invocationRegex = /(?<!\$)\b([a-zA-Z_][\w\-\.]*)\:([a-zA-Z_][\w\-\.]*)(?:\#\d+)?(?=\s*\(|\#\d+)/g;
-    let invocationMatch;
+function extractFunctions(content, relevantPrefixes, namespacePrefix) {
+    const functions = [];
+    const lines = content.split("\n"); // Store lines for line number calculations
 
-    while ((invocationMatch = invocationRegex.exec(body)) !== null) {
-        const prefix = invocationMatch[1];  // Extracts "my"
-        const funcName = invocationMatch[2]; // Extracts "get-foo-bar"
-        const arityMatch = body.substr(invocationMatch.index).match(/#(\d+)/);
-        const arity = arityMatch ? `#${arityMatch[1]}` : '';
+const functionRegex = /declare function\s+([\w\-]+:\w[\w\-]*)\s*\(([^)]*)\)\s*(?:as\s+[^{]+)?\s*\{([\s\S]*?)\};/gm;
+    let match;
 
-        // Lookup the full namespace URI using the prefix
-        let namespaceURI = namespace.uri; // Default to the module's own namespace
-        relevantPrefixes.forEach(imp => {
-            if (imp.prefix === prefix) {
-                namespaceURI = imp.uri; // Use imported namespace if matched
-            }
-        });
+    while ((match = functionRegex.exec(content)) !== null) {
+        const fullFunctionName = match[1];  // Extracts "my:get-foo-bar"
+        const paramList = match[2].trim();  // Extracts everything inside ()
+        const body = match[3].trim();       // Extracts everything inside {}
 
-        // Store the invocation under the full namespace
-        if (!invocations[namespaceURI]) {
-            invocations[namespaceURI] = new Set();
+        // Extract function name without the namespace prefix
+        const baseFunctionName = fullFunctionName.replace(`${namespacePrefix}:`, "");
+
+        // **Extract Parameters**
+        const parameters = {};
+        let paramCount = 0;
+        if (paramList) {
+            const paramLines = paramList.split(/\s*,\s*/);
+            paramLines.forEach(param => {
+                const paramParts = param.trim().split(/\s+as\s+/); // Split "name as type"
+                const paramName = paramParts[0].replace(/^\$/, ''); // Remove $
+                const paramType = paramParts[1] || null; // Use null if no type
+                if (paramName) {
+                    parameters[paramName] = paramType;
+                    paramCount++;
+                }
+            });
         }
-        invocations[namespaceURI].add(funcName + arity);
+
+        // **Format function name with arity**
+        const functionName = `${baseFunctionName}#${paramCount}`;
+
+        // **Determine Correct Line Number**
+        const functionStartIndex = match.index;
+        const lineNumber = content.substring(0, functionStartIndex).split("\n").length;
+
+        // **Extract Invocations**
+        const invocations = extractInvocations(body, relevantPrefixes);
+
+        functions.push({
+            name: functionName, // Now includes parameter count
+            line: lineNumber,
+            signature: match[0].trim(),
+            body: body,
+            invocations: invocations,
+            parameters: parameters
+        });
     }
 
-    // Convert sets to arrays
-    const invocationsObj = {};
-    for (const [ns, funcSet] of Object.entries(invocations)) {
-        invocationsObj[ns] = Array.from(funcSet);
-    }
-
-    return invocationsObj;
+    return functions;
 }
 
 
