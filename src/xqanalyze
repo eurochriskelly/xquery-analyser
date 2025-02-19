@@ -40,8 +40,6 @@ extract_all_functions() {
     node $REPO_DIR/src/extract-functions.js \
       --file-name=$f \
       --out-dir=$tdir
-    echo "check result .."
-    read x
   done
 }
 

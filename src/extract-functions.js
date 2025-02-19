@@ -87,7 +87,7 @@ function extractImports(content, filePath) {
         const importStatement = importMatch[0];
 
         // Extract prefix, URI, and filePath from the import statement
-        const importDetailsRegex = /namespace\s+["']?(\w+)["']?\s*=\s*"([^"]+)"(?:\s+at\s+"([^"]+)")?\s*;/;
+        const importDetailsRegex = /namespace\s+["']?([\w\-]+)["']?\s*=\s*"([^"]+)"(?:\s+at\s+"([^"]+)")?\s*;/;
         const detailsMatch = importStatement.match(importDetailsRegex);
        
         if (!detailsMatch) {
