@@ -10,8 +10,13 @@ function main() {
     const namespace = extractNamespace(content, fileName);
     const imports = extractImports(content, fileName);
     const relevantPrefixes = collectRelevantPrefixes(namespace.prefix, imports);
-
-    const functions = extractFunctions(content, relevantPrefixes, namespace.prefix);
+    const prefixMap = {};
+    prefixMap[namespace.prefix] = namespace.uri;
+    imports.forEach(imp => {
+        prefixMap[imp.namespace.prefix] = imp.namespace.uri || imp.namespace.filePath;
+    });
+ 
+    const functions = extractFunctions(content, relevantPrefixes, prefixMap, namespace.prefix);
 
     const result = {
         file: path.basename(fileName),
@@ -122,11 +127,11 @@ function collectRelevantPrefixes(namespacePrefix, imports) {
     return relevantPrefixes;
 }
 
-function extractFunctions(content, relevantPrefixes, namespacePrefix) {
+function extractFunctions(content, relevantPrefixes, prefixMap, namespacePrefix) {
     const functions = [];
     const lines = content.split("\n"); // Store lines for line number calculations
 
-const functionRegex = /declare function\s+([\w\-]+:\w[\w\-]*)\s*\(([^)]*)\)\s*(?:as\s+[^{]+)?\s*\{([\s\S]*?)\};/gm;
+    const functionRegex = /declare function\s+([\w\-]+:\w[\w\-]*)\s*\(([^)]*)\)\s*(?:as\s+[^{]+)?\s*\{([\s\S]*?)\};/gm;
     let match;
 
     while ((match = functionRegex.exec(content)) !== null) {
@@ -161,7 +166,7 @@ const functionRegex = /declare function\s+([\w\-]+:\w[\w\-]*)\s*\(([^)]*)\)\s*(?
         const lineNumber = content.substring(0, functionStartIndex).split("\n").length;
 
         // **Extract Invocations**
-        const invocations = extractInvocations(body, relevantPrefixes);
+        const invocations = extractInvocations(body, relevantPrefixes, prefixMap);
 
         functions.push({
             name: functionName, // Now includes parameter count
@@ -176,34 +181,32 @@ const functionRegex = /declare function\s+([\w\-]+:\w[\w\-]*)\s*\(([^)]*)\)\s*(?
     return functions;
 }
 
+function extractInvocations(body, relevantPrefixes, prefixMap) {
+     const invocations = {};
+     const invocationRegex = /(?<!\$)\b([a-zA-Z_][\w\-\.]*)\:([a-zA-Z_][\w\-\.]*)(?:\#\d+)?(?=\s*\(|\#\d+)/g;
+     let invocationMatch;
+     while ((invocationMatch = invocationRegex.exec(body)) !== null) {
+         const prefix = invocationMatch[1];
+         const funcName = invocationMatch[2];
+         const arityMatch = body.substr(invocationMatch.index).match(/#(\d+)/);
+         const arity = arityMatch ? `#${arityMatch[1]}` : '';
 
-function extractInvocations(body, relevantPrefixes) {
-    const invocations = {};
-    const invocationRegex = /(?<!\$)\b([a-zA-Z_][\w\-\.]*)\:([a-zA-Z_][\w\-\.]*)(?:\#\d+)?(?=\s*\(|\#\d+)/g;
-    let invocationMatch;
-    while ((invocationMatch = invocationRegex.exec(body)) !== null) {
-        const prefix = invocationMatch[1];
-        const funcName = invocationMatch[2];
-        const arityMatch = body.substr(invocationMatch.index).match(/#(\d+)/);
-        const arity = arityMatch ? `#${arityMatch[1]}` : '';
+         if (relevantPrefixes.has(prefix)) {
+             const nsKey = prefixMap[prefix] || prefix;
+             const fullFunctionName = funcName + arity;
+             if (!invocations[nsKey]) {
+                 invocations[nsKey] = new Set();
+             }
+             invocations[nsKey].add(fullFunctionName);
+         }
+     }
 
-        // Only include relevant prefixes
-        if (relevantPrefixes.has(prefix)) {
-            const fullFunctionName = funcName + arity;
-            if (!invocations[prefix]) {
-                invocations[prefix] = new Set();
-            }
-            invocations[prefix].add(fullFunctionName);
-        }
-    }
-
-    // Convert invocation sets to arrays
-    const invocationsObj = {};
-    for (const [prefix, funcSet] of Object.entries(invocations)) {
-        invocationsObj[prefix] = Array.from(funcSet);
-    }
-
-    return invocationsObj;
+     // Convert invocation sets to arrays
+     const invocationsObj = {};
+     for (const [key, funcSet] of Object.entries(invocations)) {
+         invocationsObj[key] = Array.from(funcSet);
+     }
+     return invocationsObj;
 }
 
 // Start the script
