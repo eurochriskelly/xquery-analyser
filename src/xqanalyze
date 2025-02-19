@@ -2,12 +2,11 @@
 export REPO_DIR="@@REPO_DIR@@"
 
 ts=$(date +%s)
-tdir=tmp/xqanalyze/$ts
+tdir=/tmp/xqanalyze/$ts
 
 main() {
   echo "Running xqanalyze"
 
-  option="import_checks"
   case $1 in
   --extract-functions | -x)
     option=extract_functions
@@ -22,7 +21,10 @@ main() {
     option=extract_all_functions
     ;;
 
-  --import-checks | "*") ;;
+  --import-checks | "*")
+    option="import_checks"
+    ;;
+
   esac
   echo "Option: $option"
 
@@ -38,6 +40,8 @@ extract_all_functions() {
     node $REPO_DIR/src/extract-functions.js \
       --file-name=$f \
       --out-dir=$tdir
+    echo "check result .."
+    read x
   done
 }
 
@@ -52,14 +56,47 @@ import_checks() {
   check_for_import_names
   generate_import_db
   ingest_csv_to_sqlite $tdir/out.csv $tdir/xqy.sqlite xqy_imports
+  ingest_csv_to_sqlite $tdir/namespaces.csv $tdir/xqy.sqlite xqy_namespaces <<EOF
+CREATE TABLE IF NOT EXISTS xqy_namespaces (
+  file TEXT,
+  prefix TEXT,
+  uri TEXT,
+  filePath TEXT
+);
+EOF
+
+  ingest_csv_to_sqlite $tdir/functions.csv $tdir/xqy.sqlite xqy_functions <<EOF
+CREATE TABLE IF NOT EXISTS xqy_functions (
+  file TEXT,
+  name TEXT,
+  line INTEGER,
+  signature TEXT
+);
+EOF
+
+  ingest_csv_to_sqlite $tdir/invocations.csv $tdir/xqy.sqlite xqy_invocations <<EOF
+CREATE TABLE IF NOT EXISTS xqy_invocations (
+  file TEXT,
+  caller TEXT,
+  invoked_module TEXT,
+  invoked_function TEXT
+);
+EOF
+
+  ingest_csv_to_sqlite $tdir/parameters.csv $tdir/xqy.sqlite xqy_parameters <<EOF
+CREATE TABLE IF NOT EXISTS xqy_parameters (
+  file TEXT,
+  function_name TEXT,
+  parameter TEXT,
+  type TEXT
+);
+EOF
   hh "Found $(wc -l $tdir/xqyfiles.txt) xquery files"
 }
 
 gen_file_list() {
-  echo making temp dir $tdir
-  if [ -d $tdir ]; then
-    rm -rf $tdir
-  fi
+  if [ -d "$tdir" ]; then rm -rf $tdir;fi
+  echo "Making temp dir $tdir"
   mkdir -p $tdir
   git ls-files | grep "\.xqy$" >$tdir/xqyfiles.txt
 }

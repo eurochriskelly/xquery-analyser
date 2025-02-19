@@ -45,41 +45,76 @@ rl.on('line', (line) => {
 
 function processFile(file) {
   const xqyData = fs.readFileSync(file, 'utf8');
-  const importRegex = /import\s+module\s+namespace\s+(\w+)\s*=\s*"([^"]+)"\s+at\s+"([^"]+)";/g;
+  const data = JSON.parse(xqyData);
 
-  const csvRows = [];
-
-  let match;
-  while ((match = importRegex.exec(xqyData)) !== null) {
-    const abbrev = match[1];
-    const namespace = match[2];
-    const modulePath = match[3];
-
-    // Check if the module is part of the local 
-
-    const goodPath = modulePath.startsWith('/') ? modulePath : `${path.dirname(fileName).replace('ml-modules/root', '')}/${modulePath}`
-    const local = localModules.has(goodPath);
-
-    csvRows.push({
-      abbrev,
-      namespace,
-      path: goodPath,
-      client: fileName.replace('ml-modules/root', ''),
-      local: local ? 'true' : (goodPath.startsWith('/MarkLogic') ? 'internal' : 'false') 
+  // --- Namespaces ---
+  const nsRows = [];
+  if (data.namespace) {
+    nsRows.push({
+      file: data.file,
+      prefix: data.namespace.prefix,
+      uri: data.namespace.uri,
+      filePath: data.namespace.filePath
     });
   }
+  if (data.imports) {
+    data.imports.forEach(imp => {
+      nsRows.push({
+        file: data.file,
+        prefix: imp.namespace.prefix,
+        uri: imp.namespace.uri,
+        filePath: imp.namespace.filePath
+      });
+    });
+  }
+  outputCSV(nsRows, ['file','prefix','uri','filePath'], 'namespaces.csv');
 
-  outputCSV(csvRows);
+  // --- Functions, Invocations & Parameters ---
+  const funcRows = [];
+  const invocRows = [];
+  const paramRows = [];
+  if (data.functions) {
+    data.functions.forEach(func => {
+      funcRows.push({
+        file: data.file,
+        name: func.name,
+        line: func.line,
+        signature: func.signature
+      });
+      if (func.invocations) {
+        Object.entries(func.invocations).forEach(([modUri, funcs]) => {
+          funcs.forEach(invFunc => {
+            invocRows.push({
+              file: data.file,
+              caller: func.name,
+              invoked_module: modUri,
+              invoked_function: invFunc
+            });
+          });
+        });
+      }
+      if (func.parameters) {
+        Object.entries(func.parameters).forEach(([param, type]) => {
+          paramRows.push({
+            file: data.file,
+            function_name: func.name,
+            parameter: param,
+            type: type.trim().replace(/\n\)$/, '')
+          });
+        });
+      }
+    });
+  }
+  outputCSV(funcRows, ['file','name','line','signature'], 'functions.csv');
+  outputCSV(invocRows, ['file','caller','invoked_module','invoked_function'], 'invocations.csv');
+  outputCSV(paramRows, ['file','function_name','parameter','type'], 'parameters.csv');
 }
 
-function outputCSV(rows) {
-  const columns = ['abbrev', 'namespace', 'path', 'client', 'local'];
-
-  // Print the header
-  if (withHeader) console.log(columns.join(','));
-
-  // Print each row
+function outputCSV(rows, columns, outFile) {
+  const csvStream = fs.createWriteStream(outFile, { flags: 'a' });
+  if (withHeader) csvStream.write(columns.join(',') + "\n");
   rows.forEach(row => {
-    console.log([row.abbrev, row.namespace, row.path, row.client, row.local].join(','));
+    csvStream.write(columns.map(col => row[col]).join(',') + "\n");
   });
+  csvStream.end();
 }
