@@ -108,9 +108,7 @@ function collectRelevantPrefixes(namespacePrefix, imports) {
 
 function extractFunctions(content, relevantPrefixes, prefixMap) {
     const functions = [];
-
-    // Pass 1: Find function start points
-    const startRegex = /declare\s+(private\s+)?function\s+([\w\-]+:\w[\w\-]*)\s*\(/g;
+    const startRegex = /declare\s+(private\s+)?function\s+([\w\-\.]+:[\w\-\.]*)\s*\(/g;
     const functionStarts = [];
     let match;
     while ((match = startRegex.exec(content)) !== null) {
@@ -122,7 +120,6 @@ function extractFunctions(content, relevantPrefixes, prefixMap) {
         });
     }
 
-    // Pass 2: Parse each function
     for (const start of functionStarts) {
         const functionText = extractFunctionText(content, start.index);
         if (!functionText) continue;
@@ -137,11 +134,9 @@ function extractFunctions(content, relevantPrefixes, prefixMap) {
 }
 
 function extractFunctionText(content, startIndex) {
-    // Find the opening brace
     let braceStart = content.indexOf('{', startIndex);
     if (braceStart === -1) return null;
 
-    // Find matching closing brace
     let braceCount = 1;
     let currentIndex = braceStart + 1;
     while (currentIndex < content.length && braceCount > 0) {
@@ -152,35 +147,45 @@ function extractFunctionText(content, startIndex) {
     }
 
     if (braceCount !== 0 || currentIndex >= content.length) return null;
-
-    // Ensure the function ends with '};'
     if (content.substring(currentIndex - 1, currentIndex + 1) !== '};') return null;
 
     return content.substring(startIndex, currentIndex + 1).trim();
 }
 
 function parseFunction(functionText, lineNumber, isPrivate, fullFunctionName, relevantPrefixes, prefixMap) {
-    // Extract signature and body
     const braceIndex = functionText.indexOf('{');
     if (braceIndex === -1) return null;
 
     const signature = functionText.substring(0, braceIndex).trim();
     const body = functionText.substring(braceIndex + 1, functionText.length - 2).trim();
 
-    // Parse parameters
-    const paramMatch = signature.match(/\(([^)]*)\)/);
-    const paramList = paramMatch ? paramMatch[1].trim() : '';
+    const openParenIndex = signature.indexOf('(');
+    if (openParenIndex === -1) return null;
+
+    let parenCount = 1;
+    let closeParenIndex = openParenIndex + 1;
+    while (closeParenIndex < signature.length && parenCount > 0) {
+        const char = signature[closeParenIndex];
+        if (char === '(') parenCount++;
+        else if (char === ')') parenCount--;
+        closeParenIndex++;
+    }
+    if (parenCount !== 0) return null;
+
+    const paramList = signature.substring(openParenIndex + 1, closeParenIndex - 1).replace(/\s+/g, ' ').trim();
     const parameters = {};
     let paramCount = 0;
     if (paramList) {
-        const paramLines = paramList.split(/\s*,\s*/);
+        const paramLines = paramList.split(',').map(p => p.trim());
         paramLines.forEach(param => {
-            const paramParts = param.trim().split(/\s+as\s+/);
-            const paramName = paramParts[0].replace(/^\$/, '');
-            const paramType = paramParts[1] || null;
-            if (paramName) {
-                parameters[paramName] = paramType;
-                paramCount++;
+            if (param) {
+                const paramParts = param.split(/\s+as\s+/);
+                const paramName = paramParts[0].replace(/^\$/, '');
+                const paramType = paramParts[1] || null;
+                if (paramName) {
+                    parameters[paramName] = paramType;
+                    paramCount++;
+                }
             }
         });
     }
