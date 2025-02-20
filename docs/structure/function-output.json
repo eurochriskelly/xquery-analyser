@@ -2,7 +2,7 @@
     "$schema": "http://json-schema.org/draft-07/schema#",
     "title": "XQuery Function Extraction Schema",
     "description": "Schema for the JSON output of an XQuery function extraction tool",
-m    "type": "object",
+    "type": "object",
     "properties": {
         "totalLines": {
             "type": "integer",
@@ -13,6 +13,11 @@ m    "type": "object",
             "type": "integer",
             "description": "Total number of functions extracted from the script",
             "minimum": 0
+        },
+        "moduleType": {
+            "type": "string",
+            "enum": ["main", "library"],
+            "description": "Type of XQuery module: 'main' for no namespace declaration, 'library' for module namespace"
         },
         "file": {
             "type": "string",
@@ -122,5 +127,5 @@ m    "type": "object",
             }
         }
     },
-    "required": ["totalLines", "totalFunctions", "file", "path", "namespace", "imports", "functions"]
+  "required": ["totalLines", "totalFunctions", "moduleType", "file", "path", "namespace", "imports", "functions"]
 }
