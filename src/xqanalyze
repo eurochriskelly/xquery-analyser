@@ -2,12 +2,11 @@
 export REPO_DIR="@@REPO_DIR@@"
 
 ts=$(date +%s)
-tdir=tmp/xqanalyze/$ts
+tdir=/tmp/xqanalyze/$ts
 
 main() {
   echo "Running xqanalyze"
 
-  option="import_checks"
   case $1 in
   --extract-functions | -x)
     option=extract_functions
@@ -22,7 +21,10 @@ main() {
     option=extract_all_functions
     ;;
 
-  --import-checks | "*") ;;
+  --import-checks | "*")
+    option="import_checks"
+    ;;
+
   esac
   echo "Option: $option"
 
@@ -32,6 +34,9 @@ main() {
 
 extract_all_functions() {
   echo "Extracting all functions"
+  if [ -d "$tdir" ]; then rm -rf $tdir;fi
+  echo "Making temp dir $tdir"
+  mkdir -p $tdir
   gen_file_list
   for f in $(cat $tdir/xqyfiles.txt); do
     echo "Processing file: $f"
@@ -49,18 +54,51 @@ extract_functions() {
 
 import_checks() {
   gen_file_list
+  rm /tmp/xqanalyze/*.csv
+  test -f /tmp/xqanalyze/xqy.sqlite && rm /tmp/xqanalyze/xqy.sqlite
   check_for_import_names
   generate_import_db
-  ingest_csv_to_sqlite $tdir/out.csv $tdir/xqy.sqlite xqy_imports
-  hh "Found $(wc -l $tdir/xqyfiles.txt) xquery files"
+  ingest_csv_to_sqlite /tmp/xqanalyze/namespaces.csv /tmp/xqanalyze/xqy.sqlite xqy_namespaces <<EOF
+CREATE TABLE IF NOT EXISTS xqy_namespaces (
+  filename TEXT,
+  file TEXT,
+  prefix TEXT,
+  uri TEXT,
+  filePath TEXT
+);
+EOF
+
+  ingest_csv_to_sqlite /tmp/xqanalyze/functions.csv /tmp/xqanalyze/xqy.sqlite xqy_functions <<EOF
+CREATE TABLE IF NOT EXISTS xqy_functions (
+  filename TEXT,
+  file TEXT,
+  name TEXT,
+  line INTEGER
+);
+EOF
+
+  ingest_csv_to_sqlite /tmp/xqanalyze/invocations.csv /tmp/xqanalyze/xqy.sqlite xqy_invocations <<EOF
+CREATE TABLE IF NOT EXISTS xqy_invocations (
+  filename TEXT,
+  file TEXT,
+  caller TEXT,
+  invoked_module TEXT,
+  invoked_function TEXT
+);
+EOF
+
+  ingest_csv_to_sqlite /tmp/xqanalyze/parameters.csv /tmp/xqanalyze/xqy.sqlite xqy_parameters <<EOF
+CREATE TABLE IF NOT EXISTS xqy_parameters (
+  filename TEXT,
+  file TEXT,
+  function_name TEXT,
+  parameter TEXT,
+  type TEXT
+);
+EOF
 }
 
 gen_file_list() {
-  echo making temp dir $tdir
-  if [ -d $tdir ]; then
-    rm -rf $tdir
-  fi
-  mkdir -p $tdir
   git ls-files | grep "\.xqy$" >$tdir/xqyfiles.txt
 }
 extract_functions() {
@@ -87,17 +125,6 @@ ingest_csv_to_sqlite() {
     sqlite3 "$db_file" "VACUUM;"
   fi
 
-  # Create the table structure based on CSV columns (assuming header row)
-  sqlite3 "$db_file" <<EOF
-CREATE TABLE IF NOT EXISTS $table_name (
-    abbrev TEXT,
-    namespace TEXT,
-    path TEXT,
-    client TEXT,
-    local TEXT
-);
-EOF
-
   # Import the CSV data into the table (ignoring the first row - the header)
   sqlite3 -separator ',' "$db_file" ".import '$csv_file' $table_name"
 
@@ -112,18 +139,15 @@ EOF
 generate_import_db() {
   hh "Generating import database"
   local index=0
-  local with_header="--with-header=true"
-  for f in $(cat $tdir/xqyfiles.txt); do
-    node $REPO_DIR/src/import-rows.js \
-      --file-name=$f \
-      --input-list=$tdir/xqyfiles.txt \
-      $with_header \
-      >>$tdir/out.csv
-    with_header=""
+  i=1 
+  withHeader=true
+  for f in $(find /tmp/xqanalyze/ -name "*.json"); do
+    echo -n "${i}: Processing file: $f ..."
+    if [ -f "/tmp/xqanalyze/functions.csv" ];then withHeader=false;fi
+    node $REPO_DIR/src/import-rows.js --file-name=$f --with-header=$withHeader
+    echo "done!"
+    i=$((i+1))
   done
-  echo "preview of output"
-  head -n 3 $tdir/out.csv
-  hh "Total imports: $(wc -l $tdir/out.csv)"
 }
 
 check_for_import_names() {
@@ -139,7 +163,7 @@ check_for_import_names() {
 }
 # Create a function to print a message in red with a timestamp prepended
 hh() {
-  echo -e "\033[31m$(date +%H:%M:%S) $1\033[0m"
+  echo -e "\033[33m$(date +%H:%M:%S) $1\033[0m"
 }
 
 main $@
