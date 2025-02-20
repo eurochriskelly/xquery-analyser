@@ -1,7 +1,7 @@
 const yargs = require('yargs');
 const sqlite3 = require('sqlite3').verbose();
 const fs = require('fs');
-const path = require('path'); // Add path module for filename parsing
+const path = require('path');
 
 // Parse command-line arguments
 const argv = yargs
@@ -31,10 +31,11 @@ const modulesMap = new Map(); // filename -> prefix
 const filenamesSet = new Set();
 const importsMap = new Map(); // filename -> Map(prefix -> filePath)
 const nodeMap = new Map(); // id -> { filename, function, calling_id }
+const functionCallCounts = new Map(); // function -> count of calls
 
 // Function to extract base filename without path or extension
 function getBaseFilename(filename) {
-  return path.basename(filename, '.xqy'); // e.g., '/opera/opera/lib/path.xqy' -> 'path'
+  return path.basename(filename, '.xqy');
 }
 
 // Load module and import data
@@ -72,7 +73,7 @@ async function buildCallStack() {
 
   const queue = [];
   let idCounter = 0;
-  const nodes = new Map(); // id -> { label, level, function, filename } (no one_over_level yet)
+  const nodes = new Map(); // id -> { label, level, function, filename }
   const edges = [];
 
   // Add starting node
@@ -94,6 +95,7 @@ async function buildCallStack() {
     filename: argv.module
   });
   nodeMap.set(startId, { filename: argv.module, function: argv.function, calling_id: null });
+  functionCallCounts.set(argv.function, (functionCallCounts.get(argv.function) || 0) + 1);
 
   // Process the call stack
   while (queue.length > 0) {
@@ -158,6 +160,7 @@ async function buildCallStack() {
             filename: B
           });
           nodeMap.set(newId, { filename: B, function: calledFunction, calling_id: current.id });
+          functionCallCounts.set(calledFunction, (functionCallCounts.get(calledFunction) || 0) + 1);
           continue;
         }
 
@@ -181,13 +184,14 @@ async function buildCallStack() {
           filename: B
         });
         nodeMap.set(newId, { filename: B, function: calledFunction, calling_id: current.id });
+        functionCallCounts.set(calledFunction, (functionCallCounts.get(calledFunction) || 0) + 1);
       }
     } catch (err) {
       console.error(`Error querying invocations for ${current.function}:`, err.message);
     }
   }
 
-  // Calculate max level
+  // Calculate max level and add reverse_level and call_count to nodes
   let maxLevel = 0;
   nodes.forEach(node => {
     if (node.level > maxLevel) {
@@ -195,21 +199,22 @@ async function buildCallStack() {
     }
   });
 
-  // Add reverse_level to all nodes
   nodes.forEach(node => {
     node.reverse_level = maxLevel - node.level;
+    node.call_count = functionCallCounts.get(node.function); // Add call count
   });
 
   // Generate GML content
   let gmlContent = 'graph [\n  directed 1\n';
 
-  // Add nodes with reverse_level instead of one_over_level
+  // Add nodes with call_count
   nodes.forEach((node, id) => {
     gmlContent += `  node [\n`;
     gmlContent += `    id ${id}\n`;
     gmlContent += `    label "${node.label.replace(/"/g, '\\"')}"\n`;
     gmlContent += `    level ${node.level}\n`;
     gmlContent += `    reverse_level ${node.reverse_level}\n`;
+    gmlContent += `    call_count ${node.call_count}\n`; // New field
     gmlContent += `    function "${node.function.replace(/"/g, '\\"')}"\n`;
     gmlContent += `    filename "${node.filename.replace(/"/g, '\\"')}"\n`;
     gmlContent += `  ]\n`;

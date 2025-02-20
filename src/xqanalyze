@@ -40,8 +40,7 @@ build_stack() {
   echo "Building stack"
   node $REPO_DIR/src/build-stack.js \
     --db /tmp/xqanalyze/xqy.sqlite \
-    --module /opera/opera/lib/validation.xqy \
-    --function "local:valideer-xml-met-profiel#3" 
+    --interactive
   mv output.gml /tmp/
 }
 
