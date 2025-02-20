@@ -1,12 +1,12 @@
-const fs = require('fs');
-const path = require('path');
+import { readFileSync, writeFileSync } from 'fs';
+import { basename, dirname, join } from 'path';
 
 function main() {
     const [fileName, outDir] = parseArguments();
     let content = readFile(fileName);
     content = removeComments(content);
 
-    const namespace = extractNamespace(content, fileName);
+    const { namespace, moduleType } = extractNamespace(content, fileName);
     const imports = extractImports(content, fileName) || [];
     const relevantPrefixes = collectRelevantPrefixes(namespace.prefix, imports);
     const prefixMap = {};
@@ -19,18 +19,19 @@ function main() {
     const totalLines = content.split('\n').length;
 
     const result = {
-        totalLines: totalLines,
-        totalFunctions: totalFunctions,
-        file: path.basename(fileName),
-        path: path.dirname(fileName).replace('./ml-modules/root', ''),
-        namespace: namespace,
-        imports: imports,
-        functions: functions
+        totalLines,
+        totalFunctions,
+        moduleType,
+        file: basename(fileName),
+        path: dirname(fileName).replace('./ml-modules/root', ''),
+        namespace,
+        imports,
+        functions
     };
 
     if (outDir) {
-        const outFileName = path.join(outDir, fileName.replace(/\//g, '_') + '.json');
-        fs.writeFileSync(outFileName, JSON.stringify(result, null, 4));
+        const outFileName = join(outDir, fileName.replace(/\//g, '_') + '.json');
+        writeFileSync(outFileName, JSON.stringify(result, null, 4));
         console.log(`Output written to ${outFileName}`);
     } else {
         console.log(JSON.stringify(result, null, 4));
@@ -52,7 +53,7 @@ function parseArguments() {
 
 function readFile(fileName) {
     try {
-        return fs.readFileSync(fileName, 'utf8');
+        return readFileSync(fileName, 'utf8');
     } catch (err) {
         console.error(`Error reading file ${fileName}:`, err.message);
         process.exit(1);
@@ -66,15 +67,26 @@ function removeComments(content) {
 function extractNamespace(content, filePath) {
     const namespaceRegex = /module\s+namespace\s+["']?(\w+)["']?\s*=\s*"([^"]+)"\s*;/;
     const namespaceMatch = content.match(namespaceRegex);
-    if (!namespaceMatch) {
-        console.error('No module namespace declaration found.');
-        process.exit(1);
+    if (namespaceMatch) {
+        return {
+            namespace: {
+                prefix: namespaceMatch[1],
+                uri: namespaceMatch[2],
+                filePath: filePath.replace('./ml-modules/root', '')
+            },
+            moduleType: 'library'
+        };
+    } else {
+        console.warn(`No module namespace declaration found in ${filePath}. Treating as main module.`);
+        return {
+            namespace: {
+                prefix: 'main',
+                uri: '',
+                filePath: filePath.replace('./ml-modules/root', '')
+            },
+            moduleType: 'main'
+        };
     }
-    return {
-        prefix: namespaceMatch[1],
-        uri: namespaceMatch[2],
-        filePath: filePath.replace('./ml-modules/root', '')
-    };
 }
 
 function extractImports(content, filePath) {
@@ -87,7 +99,7 @@ function extractImports(content, filePath) {
         const detailsMatch = importStatement.match(importDetailsRegex);
         if (detailsMatch) {
             const usePath = detailsMatch[3] ? (detailsMatch[3].split('/').length === 1 ?
-                path.dirname(filePath).replace('./ml-modules/root', '') + '/' + detailsMatch[3] : detailsMatch[3]) : null;
+                dirname(filePath).replace('./ml-modules/root', '') + '/' + detailsMatch[3] : detailsMatch[3]) : null;
             imports.push({
                 namespace: {
                     prefix: detailsMatch[1],
@@ -108,23 +120,34 @@ function collectRelevantPrefixes(namespacePrefix, imports) {
 
 function extractFunctions(content, relevantPrefixes, prefixMap) {
     const functions = [];
-    const startRegex = /declare\s+(private\s+)?function\s+([\w\-\.]+:[\w\-\.]*)\s*\(/g;
-    const functionStarts = [];
+    const startRegex = /declare\s*([\s\S]*?)\s*function\s+([\w\-\.]+:[\w\-\.]*)\s*\(/gm;
     let match;
     while ((match = startRegex.exec(content)) !== null) {
-        functionStarts.push({
-            index: match.index,
-            line: content.substring(0, match.index).split('\n').length,
-            private: !!match[1],
-            name: match[2]
-        });
-    }
+        const startIndex = match.index;
+        const modifiersAndAnnotations = match[1];
+        const name = match[2];
 
-    for (const start of functionStarts) {
-        const functionText = extractFunctionText(content, start.index);
+        const isPrivate = /\bprivate\b/.test(modifiersAndAnnotations);
+        const line = content.substring(0, startIndex).split('\n').length;
+
+        let annotationStart = startIndex;
+        let prevLineIndex = content.lastIndexOf('\n', startIndex - 1);
+        while (prevLineIndex >= 0) {
+            const lineBefore = content.substring(prevLineIndex + 1, annotationStart).trim();
+            if (lineBefore.startsWith('%')) {
+                annotationStart = prevLineIndex + 1;
+                prevLineIndex = content.lastIndexOf('\n', prevLineIndex - 1);
+            } else {
+                break;
+            }
+        }
+
+        const adjustedStartIndex = annotationStart;
+
+        const functionText = extractFunctionText(content, adjustedStartIndex);
         if (!functionText) continue;
 
-        const parsedFunction = parseFunction(functionText, start.line, start.private, start.name, relevantPrefixes, prefixMap);
+        const parsedFunction = parseFunction(functionText, line, isPrivate, name, relevantPrefixes, prefixMap);
         if (parsedFunction) {
             functions.push(parsedFunction);
         }
@@ -159,20 +182,36 @@ function parseFunction(functionText, lineNumber, isPrivate, fullFunctionName, re
     const signature = functionText.substring(0, braceIndex).trim();
     const body = functionText.substring(braceIndex + 1, functionText.length - 2).trim();
 
-    const openParenIndex = signature.indexOf('(');
+    const signatureLines = signature.split('\n').map(line => line.trim());
+    const functionLines = signatureLines.filter(line => !line.startsWith('%'));
+
+    let paramText = '';
+    let parenCount = 0;
+    for (const line of functionLines) {
+        if (line.includes('function') || parenCount > 0) {
+            paramText += ' ' + line;
+            for (const char of line) {
+                if (char === '(') parenCount++;
+                else if (char === ')') parenCount--;
+            }
+            if (parenCount === 0 && line.includes(')')) break;
+        }
+    }
+
+    const openParenIndex = paramText.indexOf('(');
     if (openParenIndex === -1) return null;
 
-    let parenCount = 1;
+    let closeParenCount = 1;
     let closeParenIndex = openParenIndex + 1;
-    while (closeParenIndex < signature.length && parenCount > 0) {
-        const char = signature[closeParenIndex];
-        if (char === '(') parenCount++;
-        else if (char === ')') parenCount--;
+    while (closeParenIndex < paramText.length && closeParenCount > 0) {
+        const char = paramText[closeParenIndex];
+        if (char === '(') closeParenCount++;
+        else if (char === ')') closeParenCount--;
         closeParenIndex++;
     }
-    if (parenCount !== 0) return null;
+    if (closeParenCount !== 0) return null;
 
-    const paramList = signature.substring(openParenIndex + 1, closeParenIndex - 1).replace(/\s+/g, ' ').trim();
+    const paramList = paramText.substring(openParenIndex + 1, closeParenIndex - 1).replace(/\s+/g, ' ').trim();
     const parameters = {};
     let paramCount = 0;
     if (paramList) {
@@ -196,10 +235,10 @@ function parseFunction(functionText, lineNumber, isPrivate, fullFunctionName, re
     return {
         name: functionName,
         line: lineNumber,
-        signature: signature,
-        body: body,
-        invocations: invocations,
-        parameters: parameters,
+        signature,
+        body,
+        invocations,
+        parameters,
         private: isPrivate
     };
 }

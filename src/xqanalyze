@@ -41,6 +41,8 @@ build_stack() {
   node $REPO_DIR/src/build-stack.js \
     --db /tmp/xqanalyze/xqy.sqlite \
     --interactive
+
+  echo "Number of lines in graph $(cat output.gml|wc -l)"
   mv output.gml /tmp/
 }
 
@@ -123,6 +125,12 @@ CREATE TABLE IF NOT EXISTS xqy_parameters (
   type TEXT
 );
 EOF
+
+  echo "Modules row count: $(wc -l /tmp/xqanalyze/modules.csv)"
+  echo "Imports row count: $(wc -l /tmp/xqanalyze/imports.csv)"
+  echo "Functions row count: $(wc -l /tmp/xqanalyze/functions.csv)"
+  echo "Invocations row count: $(wc -l /tmp/xqanalyze/invocations.csv)"
+  echo "Parameters row count: $(wc -l /tmp/xqanalyze/parameters.csv)"
 }
 
 gen_file_list() {
@@ -156,11 +164,7 @@ ingest_csv_to_sqlite() {
   sqlite3 -separator ',' "$db_file" ".import '$csv_file' $table_name"
 
   echo "Data successfully ingested into '$db_file' table '$table_name'."
-  echo "Open with sqlitestudio? (y/n)"
-  read x
-  if [ "$x" == "y" ]; then
-    sqlitestudio $db_file
-  fi
+  echo "To open with sqlitestudio, run 'sqlitestudio $dbfile'"
 }
 
 generate_import_db() {

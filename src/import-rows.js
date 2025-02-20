@@ -1,4 +1,4 @@
-const fs = require("fs");
+import { readFileSync, createWriteStream } from "fs";
 
 // Command-line arguments parsing
 const args = process.argv.slice(2);
@@ -27,7 +27,7 @@ if (!fileName) {
 processFile(fileName);
 
 function processFile(file) {
-  const xqyData = fs.readFileSync(file, "utf8");
+  const xqyData = readFileSync(file, "utf8");
   const data = JSON.parse(xqyData);
 
   const filename = data.path.split("root").pop() + "/" + data.file;
@@ -161,7 +161,7 @@ function processFile(file) {
 }
 
 function outputCSV(rows, columns, outFile) {
-  const csvStream = fs.createWriteStream(outFile, { flags: "a" });
+  const csvStream = createWriteStream(outFile, { flags: "a" });
   if (withHeader) csvStream.write(columns.join(",") + "\n");
   rows.forEach((row) => {
     csvStream.write(columns.map((col) => row[col]).join(",") + "\n");
