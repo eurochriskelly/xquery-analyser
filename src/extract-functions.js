@@ -1,6 +1,5 @@
 const fs = require('fs');
 const path = require('path');
-let offset = 0;
 
 function main() {
     const [fileName, outDir] = parseArguments();
@@ -11,11 +10,12 @@ function main() {
     const imports = extractImports(content, fileName) || [];
     const relevantPrefixes = collectRelevantPrefixes(namespace.prefix, imports);
     const prefixMap = {};
-    prefixMap[namespace.prefix] = namespace.uri;
+    prefixMap[namespace.prefix] = namespace.filePath;
+    prefixMap['local'] = namespace.filePath;
     imports.forEach(imp => {
-        prefixMap[imp.namespace.prefix] = imp.namespace.uri || imp.namespace.filePath;
+        prefixMap[imp.namespace.prefix] = imp.namespace.filePath;
     });
- 
+
     const functions = extractFunctions(content, relevantPrefixes, prefixMap, namespace.prefix);
 
     const result = {
@@ -59,7 +59,6 @@ function readFile(fileName) {
 }
 
 function removeComments(content) {
-    // XQuery comments are delimited by (: and :)
     return content.replace(/\(\:[\s\S]*?\:\)/g, '');
 }
 
@@ -85,28 +84,13 @@ function extractImports(content, filePath) {
     let importMatch;
     while ((importMatch = importRegex.exec(content)) !== null) {
         const importStatement = importMatch[0];
-
-        // Extract prefix, URI, and filePath from the import statement
         const importDetailsRegex = /namespace\s+["']?([\w\-]+)["']?\s*=\s*"([^"]+)"(?:\s+at\s+"([^"]+)")?\s*;/;
         const detailsMatch = importStatement.match(importDetailsRegex);
-       
-        if (!detailsMatch) {
-            imports.push({
-                namespace: {
-                    prefix: null,
-                    uri: null,
-                    filePath: null 
-                }
-            });
-            return
-        }
-
-        const pathParts = detailsMatch[3]?.split('/');
-        const usePath = pathParts.length === 1
-            ? path.dirname(filePath).replace('./ml-modules/root', '') + '/' + detailsMatch[3]
-            : detailsMatch[3] || null;
-
         if (detailsMatch) {
+            const pathParts = detailsMatch[3]?.split('/');
+            const usePath = pathParts && pathParts.length === 1
+                ? path.dirname(filePath).replace('./ml-modules/root', '') + '/' + detailsMatch[3]
+                : detailsMatch[3] || null;
             imports.push({
                 namespace: {
                     prefix: detailsMatch[1],
@@ -120,7 +104,7 @@ function extractImports(content, filePath) {
 }
 
 function collectRelevantPrefixes(namespacePrefix, imports) {
-    const relevantPrefixes = new Set([namespacePrefix]);
+    const relevantPrefixes = new Set([namespacePrefix, 'local']);
     imports?.forEach(imp => {
         relevantPrefixes.add(imp.namespace.prefix);
     });
@@ -129,28 +113,27 @@ function collectRelevantPrefixes(namespacePrefix, imports) {
 
 function extractFunctions(content, relevantPrefixes, prefixMap, namespacePrefix) {
     const functions = [];
-    const lines = content.split("\n"); // Store lines for line number calculations
+    const lines = content.split("\n");
 
-    const functionRegex = /declare function\s+([\w\-]+:\w[\w\-]*)\s*\(([^)]*)\)\s*(?:as\s+[^{]+)?\s*\{([\s\S]*?)\};/gm;
+    const functionRegex = /(?:%[\w\-]+(?::[\w\-]+)?\s*)*declare(\s+private)?\s+function\s+([\w\-]+:\w[\w\-]*)\s*\(([^)]*)\)\s*(?:as\s+[^{]+)?\s*\{([\s\S]*?)\};/gm;
     let match;
 
     while ((match = functionRegex.exec(content)) !== null) {
-        const fullFunctionName = match[1];  // Extracts "my:get-foo-bar"
-        const paramList = match[2].trim();  // Extracts everything inside ()
-        const body = match[3].trim();       // Extracts everything inside {}
+        const privateKeyword = match[1];
+        const fullFunctionName = match[2];
+        const paramList = match[3].trim();
+        const body = match[4].trim();
 
-        // Extract function name without the namespace prefix
-        const baseFunctionName = fullFunctionName.replace(`${namespacePrefix}:`, "");
+        const isPrivate = privateKeyword ? true : false;
 
-        // **Extract Parameters**
         const parameters = {};
         let paramCount = 0;
         if (paramList) {
             const paramLines = paramList.split(/\s*,\s*/);
             paramLines.forEach(param => {
-                const paramParts = param.trim().split(/\s+as\s+/); // Split "name as type"
-                const paramName = paramParts[0].replace(/^\$/, ''); // Remove $
-                const paramType = paramParts[1] || null; // Use null if no type
+                const paramParts = param.trim().split(/\s+as\s+/);
+                const paramName = paramParts[0].replace(/^\$/, '');
+                const paramType = paramParts[1] || null;
                 if (paramName) {
                     parameters[paramName] = paramType;
                     paramCount++;
@@ -158,23 +141,21 @@ function extractFunctions(content, relevantPrefixes, prefixMap, namespacePrefix)
             });
         }
 
-        // **Format function name with arity**
-        const functionName = `${baseFunctionName}#${paramCount}`;
+        const functionName = `${fullFunctionName}#${paramCount}`;
 
-        // **Determine Correct Line Number**
         const functionStartIndex = match.index;
         const lineNumber = content.substring(0, functionStartIndex).split("\n").length;
 
-        // **Extract Invocations**
         const invocations = extractInvocations(body, relevantPrefixes, prefixMap);
 
         functions.push({
-            name: functionName, // Now includes parameter count
+            name: functionName,
             line: lineNumber,
             signature: match[0].trim(),
             body: body,
             invocations: invocations,
-            parameters: parameters
+            parameters: parameters,
+            private: isPrivate
         });
     }
 
@@ -182,32 +163,59 @@ function extractFunctions(content, relevantPrefixes, prefixMap, namespacePrefix)
 }
 
 function extractInvocations(body, relevantPrefixes, prefixMap) {
-     const invocations = {};
-     const invocationRegex = /(?<!\$)\b([a-zA-Z_][\w\-\.]*)\:([a-zA-Z_][\w\-\.]*)(?:\#\d+)?(?=\s*\(|\#\d+)/g;
-     let invocationMatch;
-     while ((invocationMatch = invocationRegex.exec(body)) !== null) {
-         const prefix = invocationMatch[1];
-         const funcName = invocationMatch[2];
-         const arityMatch = body.substr(invocationMatch.index).match(/#(\d+)/);
-         const arity = arityMatch ? `#${arityMatch[1]}` : '';
+    const invocations = {};
+    const invocationRegex = /(?<!\$)\b([a-zA-Z_][\w\-\.]*)\:([a-zA-Z_][\w\-\.]*)(?:\#\d+)?\s*\(/g;
+    let invocationMatch;
 
-         if (relevantPrefixes.has(prefix)) {
-             const nsKey = prefixMap[prefix] || prefix;
-             const fullFunctionName = funcName + arity;
-             if (!invocations[nsKey]) {
-                 invocations[nsKey] = new Set();
-             }
-             invocations[nsKey].add(fullFunctionName);
-         }
-     }
+    while ((invocationMatch = invocationRegex.exec(body)) !== null) {
+        const prefix = invocationMatch[1];
+        const funcName = invocationMatch[2];
+        const startIndex = invocationMatch.index;
+        const parenStart = body.indexOf('(', startIndex);
 
-     // Convert invocation sets to arrays
-     const invocationsObj = {};
-     for (const [key, funcSet] of Object.entries(invocations)) {
-         invocationsObj[key] = Array.from(funcSet);
-     }
-     return invocationsObj;
+        // Find the matching closing parenthesis and extract the argument list
+        let openParens = 1;
+        let currentIndex = parenStart + 1;
+        while (currentIndex < body.length && openParens > 0) {
+            const char = body[currentIndex];
+            if (char === '(') openParens++;
+            else if (char === ')') openParens--;
+            currentIndex++;
+        }
+
+        if (openParens !== 0) {
+            // Unmatched parentheses, skip this invocation
+            continue;
+        }
+
+        const argList = body.substring(parenStart + 1, currentIndex - 1).trim();
+
+        // Count top-level commas to determine arity
+        let argCount = 0;
+        let nestedLevel = 0;
+        for (let i = 0; i < argList.length; i++) {
+            const char = argList[i];
+            if (char === '(' || char === '[' || char === '{') nestedLevel++;
+            else if (char === ')' || char === ']' || char === '}') nestedLevel--;
+            else if (char === ',' && nestedLevel === 0) argCount++;
+        }
+        argCount = argList.length > 0 ? argCount + 1 : 0;
+
+        if (relevantPrefixes.has(prefix)) {
+            const nsKey = prefixMap[prefix] || prefix;
+            const fullFunctionName = `${funcName}#${argCount}`;
+            if (!invocations[nsKey]) {
+                invocations[nsKey] = new Set();
+            }
+            invocations[nsKey].add(fullFunctionName);
+        }
+    }
+
+    const invocationsObj = {};
+    for (const [key, funcSet] of Object.entries(invocations)) {
+        invocationsObj[key] = Array.from(funcSet);
+    }
+    return invocationsObj;
 }
 
-// Start the script
 main();
