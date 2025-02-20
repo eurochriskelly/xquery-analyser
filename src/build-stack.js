@@ -1,13 +1,24 @@
-const yargs = require('yargs');
-const sqlite3 = require('sqlite3').verbose();
-const fs = require('fs');
-const path = require('path');
+import yargs from 'yargs/yargs';
+import { hideBin } from 'yargs/helpers';
+import sqlite3 from 'sqlite3';
+import fs from 'fs';
+import path from 'path';
+import inquirer from 'inquirer';
+import inquirerAutocompletePrompt from 'inquirer-autocomplete-prompt';
 
-// Parse command-line arguments
-const argv = yargs
-  .option('db', { describe: 'SQLite database file', demandOption: true, type: 'string' })
-  .option('module', { describe: 'Starting module filename', demandOption: true, type: 'string' })
-  .option('function', { describe: 'Starting function with arity', demandOption: true, type: 'string' })
+inquirer.registerPrompt('autocomplete', inquirerAutocompletePrompt);
+
+const argv = yargs(hideBin(process.argv))
+  .option('db', { describe: 'SQLite database file', demandOption: true, type: 'string'   })
+  .option('module', { describe: 'Starting module filename', type: 'string' })
+  .option('function', { describe: 'Starting function with arity', type: 'string' })
+  .option('interactive', { describe: 'Run in interactive mode', type: 'boolean', default: false })
+  .check((argv) => {
+    if (!argv.interactive && (!argv.module || !argv.function)) {
+      throw new Error('Must provide --module and --function unless --interactive is used');
+    }
+    return true;
+  })
   .argv;
 
 // Connect to the database
@@ -27,11 +38,11 @@ const dbAll = (sql, params) => new Promise((resolve, reject) => {
 });
 
 // Initialize data structures
-const modulesMap = new Map(); // filename -> prefix
+const modulesMap = new Map();
 const filenamesSet = new Set();
-const importsMap = new Map(); // filename -> Map(prefix -> filePath)
-const nodeMap = new Map(); // id -> { filename, function, calling_id }
-const functionCallCounts = new Map(); // function -> count of calls
+const importsMap = new Map();
+const nodeMap = new Map();
+const functionCallCounts = new Map();
 
 // Function to extract base filename without path or extension
 function getBaseFilename(filename) {
@@ -68,21 +79,56 @@ function isInAncestorChain(id, targetFilename, targetFunction) {
   return false;
 }
 
-async function buildCallStack() {
+// Interactive selection of module and function
+async function selectModuleAndFunction() {
+  // Get list of modules
+  const modules = await dbAll('SELECT DISTINCT filename FROM xqy_modules ORDER BY filename', []);
+  const moduleChoices = modules.map(row => row.filename);
+
+  const { module } = await inquirer.prompt({
+    type: 'autocomplete',
+    name: 'module',
+    message: 'Select a module (type to filter, arrow keys to navigate):',
+    source: async (answersSoFar, input) => {
+      input = input || '';
+      return moduleChoices.filter(choice => choice.toLowerCase().includes(input.toLowerCase()));
+    }
+  });
+
+  const selectedModule = module;
+
+  // Get list of functions for the selected module
+  const functions = await dbAll('SELECT name FROM xqy_functions WHERE filename = ? ORDER BY name', [selectedModule]);
+  const functionChoices = functions.map(row => row.name);
+
+  const { func } = await inquirer.prompt({
+    type: 'autocomplete',
+    name: 'func',
+    message: 'Select a function (type to filter, arrow keys to navigate):',
+    source: async (answersSoFar, input) => {
+      input = input || '';
+      return functionChoices.filter(choice => choice.toLowerCase().includes(input.toLowerCase()));
+    }
+  });
+
+  return { module: selectedModule, function: func };
+}
+
+async function buildCallStack(selectedModule, selectedFunction) {
   await loadData();
 
   const queue = [];
   let idCounter = 0;
-  const nodes = new Map(); // id -> { label, level, function, filename }
+  const nodes = new Map();
   const edges = [];
 
   // Add starting node
   const startId = ++idCounter;
-  const startBaseName = getBaseFilename(argv.module);
-  const startLabel = `${startBaseName}/${argv.function.split(':')[1]}`;
+  const startBaseName = getBaseFilename(selectedModule);
+  const startLabel = `${startBaseName}/${selectedFunction.split(':')[1]}`;
   queue.push({
-    filename: argv.module,
-    function: argv.function,
+    filename: selectedModule,
+    function: selectedFunction,
     level: 0,
     id: startId,
     calling_id: null,
@@ -91,11 +137,11 @@ async function buildCallStack() {
   nodes.set(startId, {
     label: startLabel,
     level: 0,
-    function: argv.function,
-    filename: argv.module
+    function: selectedFunction,
+    filename: selectedModule
   });
-  nodeMap.set(startId, { filename: argv.module, function: argv.function, calling_id: null });
-  functionCallCounts.set(argv.function, (functionCallCounts.get(argv.function) || 0) + 1);
+  nodeMap.set(startId, { filename: selectedModule, function: selectedFunction, calling_id: null });
+  functionCallCounts.set(selectedFunction, (functionCallCounts.get(selectedFunction) || 0) + 1);
 
   // Process the call stack
   while (queue.length > 0) {
@@ -201,39 +247,47 @@ async function buildCallStack() {
 
   nodes.forEach(node => {
     node.reverse_level = maxLevel - node.level;
-    node.call_count = functionCallCounts.get(node.function); // Add call count
+    node.call_count = functionCallCounts.get(node.function);
   });
 
   // Generate GML content
   let gmlContent = 'graph [\n  directed 1\n';
-
-  // Add nodes with call_count
   nodes.forEach((node, id) => {
     gmlContent += `  node [\n`;
     gmlContent += `    id ${id}\n`;
     gmlContent += `    label "${node.label.replace(/"/g, '\\"')}"\n`;
     gmlContent += `    level ${node.level}\n`;
     gmlContent += `    reverse_level ${node.reverse_level}\n`;
-    gmlContent += `    call_count ${node.call_count}\n`; // New field
+    gmlContent += `    call_count ${node.call_count}\n`;
     gmlContent += `    function "${node.function.replace(/"/g, '\\"')}"\n`;
     gmlContent += `    filename "${node.filename.replace(/"/g, '\\"')}"\n`;
     gmlContent += `  ]\n`;
   });
-
-  // Add edges
   edges.forEach(edge => {
     gmlContent += `  edge [\n    source ${edge.source}\n    target ${edge.target}\n  ]\n`;
   });
-
   gmlContent += ']\n';
 
-  // Write to output.gml
   fs.writeFileSync('output.gml', gmlContent);
   console.log('Generated output.gml');
   db.close();
 }
 
-buildCallStack().catch(err => {
-  console.error('Error in buildCallStack:', err);
+// Main execution
+async function main() {
+  let module = argv.module;
+  let func = argv.function;
+
+  if (argv.interactive) {
+    const selections = await selectModuleAndFunction();
+    module = selections.module;
+    func = selections.function;
+  }
+
+  await buildCallStack(module, func);
+}
+
+main().catch(err => {
+  console.error('Error:', err);
   db.close();
 });
