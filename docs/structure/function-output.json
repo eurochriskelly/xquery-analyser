@@ -1,0 +1,126 @@
+{
+    "$schema": "http://json-schema.org/draft-07/schema#",
+    "title": "XQuery Function Extraction Schema",
+    "description": "Schema for the JSON output of an XQuery function extraction tool",
+m    "type": "object",
+    "properties": {
+        "totalLines": {
+            "type": "integer",
+            "description": "Total number of lines in the XQuery script after comment removal",
+            "minimum": 0
+        },
+        "totalFunctions": {
+            "type": "integer",
+            "description": "Total number of functions extracted from the script",
+            "minimum": 0
+        },
+        "file": {
+            "type": "string",
+            "description": "Base name of the input XQuery file"
+        },
+        "path": {
+            "type": "string",
+            "description": "Directory path of the input file relative to './ml-modules/root'"
+        },
+        "namespace": {
+            "type": "object",
+            "description": "Module namespace details",
+            "properties": {
+                "prefix": {
+                    "type": "string",
+                    "description": "Namespace prefix (e.g., 'local')"
+                },
+                "uri": {
+                    "type": "string",
+                    "description": "Namespace URI (e.g., 'http://example.com')"
+                },
+                "filePath": {
+                    "type": "string",
+                    "description": "Relative file path of the module"
+                }
+            },
+            "required": ["prefix", "uri", "filePath"]
+        },
+        "imports": {
+            "type": "array",
+            "description": "List of imported modules",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "namespace": {
+                        "type": "object",
+                        "properties": {
+                            "prefix": {
+                                "type": "string",
+                                "description": "Prefix of the imported module"
+                            },
+                            "uri": {
+                                "type": "string",
+                                "description": "URI of the imported module"
+                            },
+                            "filePath": {
+                                "type": ["string", "null"],
+                                "description": "Path to the imported file, or null if not specified"
+                            }
+                        },
+                        "required": ["prefix", "uri", "filePath"]
+                    }
+                },
+                "required": ["namespace"]
+            }
+        },
+        "functions": {
+            "type": "array",
+            "description": "List of extracted functions",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "name": {
+                        "type": "string",
+                        "description": "Function name with arity (e.g., 'local:func#2')",
+                        "pattern": "^[\\w\\-\\.]+:[\\w\\-\\.]+#\\d+$"
+                    },
+                    "line": {
+                        "type": "integer",
+                        "description": "Line number where the function is declared",
+                        "minimum": 1
+                    },
+                    "signature": {
+                        "type": "string",
+                        "description": "Full function signature including parameters and return type"
+                    },
+                    "body": {
+                        "type": "string",
+                        "description": "Content of the function body"
+                    },
+                    "invocations": {
+                        "type": "object",
+                        "description": "Functions invoked within this function, grouped by module path or prefix",
+                        "additionalProperties": {
+                            "type": "array",
+                            "items": {
+                                "type": "string",
+                                "description": "Invoked function name with arity (e.g., 'valideer-bg#1')",
+                                "pattern": "^[\\w\\-\\.]+#\\d+$"
+                            }
+                        }
+                    },
+                    "parameters": {
+                        "type": "object",
+                        "description": "Function parameters",
+                        "additionalProperties": {
+                            "type": ["string", "null"],
+                            "description": "Parameter type (e.g., 'element()' or null if unspecified)"
+                        }
+                    },
+                    "private": {
+                        "type": "boolean",
+                        "description": "Whether the function is declared as private"
+                    }
+                },
+                "required": ["name", "line", "signature", "body", "invocations", "parameters", "private"]
+            }
+        }
+    },
+    "required": ["totalLines", "totalFunctions", "file", "path", "namespace", "imports", "functions"]
+}

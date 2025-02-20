@@ -1,6 +1,7 @@
 {
   "name": "xquery-analyser",
   "version": "1.0.0",
+  "type": "module",
   "main": "index.js",
   "scripts": {
     "build": "sudo make"
@@ -8,5 +9,12 @@
   "keywords": [],
   "author": "",
   "license": "ISC",
-  "description": ""
+  "description": "",
+  "dependencies": {
+    "csv-parser": "^3.2.0",
+    "csv-writer": "^1.6.0",
+    "inquirer": "^9.2.23",
+    "inquirer-autocomplete-prompt": "^3.0.1",
+    "sqlite3": "^5.1.7"
+  }
 }

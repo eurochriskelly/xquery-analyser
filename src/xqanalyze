@@ -21,6 +21,10 @@ main() {
     option=extract_all_functions
     ;;
 
+  --build-stack)
+    option="build_stack"
+    ;;
+
   --import-checks | "*")
     option="import_checks"
     ;;
@@ -32,17 +36,27 @@ main() {
   $option $file
 }
 
+build_stack() {
+  echo "Building stack"
+  node $REPO_DIR/src/build-stack.js \
+    --db /tmp/xqanalyze/xqy.sqlite \
+    --interactive
+  mv output.gml /tmp/
+}
+
 extract_all_functions() {
   echo "Extracting all functions"
   if [ -d "$tdir" ]; then rm -rf $tdir;fi
   echo "Making temp dir $tdir"
   mkdir -p $tdir
   gen_file_list
+  i=1
   for f in $(cat $tdir/xqyfiles.txt); do
-    echo "Processing file: $f"
+    echo "${i}: Processing file: $f"
     node $REPO_DIR/src/extract-functions.js \
       --file-name=$f \
       --out-dir=$tdir
+    i=$((i + 1))
   done
 }
 
@@ -58,13 +72,25 @@ import_checks() {
   test -f /tmp/xqanalyze/xqy.sqlite && rm /tmp/xqanalyze/xqy.sqlite
   check_for_import_names
   generate_import_db
-  ingest_csv_to_sqlite /tmp/xqanalyze/namespaces.csv /tmp/xqanalyze/xqy.sqlite xqy_namespaces <<EOF
-CREATE TABLE IF NOT EXISTS xqy_namespaces (
+
+  ingest_csv_to_sqlite /tmp/xqanalyze/modules.csv /tmp/xqanalyze/xqy.sqlite xqy_modules <<EOF
+CREATE TABLE IF NOT EXISTS xqy_modules (
+  filename TEXT,
+  prefix TEXT,
+  uri TEXT,
+  filePath TEXT
+);
+
+EOF
+  ingest_csv_to_sqlite /tmp/xqanalyze/imports.csv /tmp/xqanalyze/xqy.sqlite xqy_imports<<EOF
+CREATE TABLE IF NOT EXISTS xqy_modules (
   filename TEXT,
   file TEXT,
   prefix TEXT,
   uri TEXT,
-  filePath TEXT
+  filePath TEXT,
+  numFunctions INTEGER,
+  numLines INTEGER
 );
 EOF
 
@@ -73,7 +99,8 @@ CREATE TABLE IF NOT EXISTS xqy_functions (
   filename TEXT,
   file TEXT,
   name TEXT,
-  line INTEGER
+  line INTEGER,
+  private BOOLEAN
 );
 EOF
 
