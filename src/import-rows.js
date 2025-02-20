@@ -30,7 +30,6 @@ function processFile(file) {
   const xqyData = fs.readFileSync(file, 'utf8');
   const data = JSON.parse(xqyData);
 
-
   const filename = data.path.split('root').pop() + '/' +  data.file;
   // --- Namespaces ---
   const nsRows = [];
@@ -88,7 +87,7 @@ function processFile(file) {
             file: data.file,
             function_name: func.name,
             parameter: param,
-            type: type.trim().replace(/\n\)$/, '')
+            type: (type||'').trim().replace(/\n\)$/, '')
           });
         });
       }

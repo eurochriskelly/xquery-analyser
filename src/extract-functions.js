@@ -8,7 +8,7 @@ function main() {
     content = removeComments(content);
 
     const namespace = extractNamespace(content, fileName);
-    const imports = extractImports(content, fileName);
+    const imports = extractImports(content, fileName) || [];
     const relevantPrefixes = collectRelevantPrefixes(namespace.prefix, imports);
     const prefixMap = {};
     prefixMap[namespace.prefix] = namespace.uri;

@@ -55,11 +55,12 @@ extract_functions() {
 import_checks() {
   gen_file_list
   rm /tmp/xqanalyze/*.csv
+  test -f /tmp/xqanalyze/xqy.sqlite && rm /tmp/xqanalyze/xqy.sqlite
   check_for_import_names
   generate_import_db
-  ingest_csv_to_sqlite $tdir/out.csv $tdir/xqy.sqlite xqy_imports
-  ingest_csv_to_sqlite $tdir/namespaces.csv $tdir/xqy.sqlite xqy_namespaces <<EOF
+  ingest_csv_to_sqlite /tmp/xqanalyze/namespaces.csv /tmp/xqanalyze/xqy.sqlite xqy_namespaces <<EOF
 CREATE TABLE IF NOT EXISTS xqy_namespaces (
+  filename TEXT,
   file TEXT,
   prefix TEXT,
   uri TEXT,
@@ -67,17 +68,18 @@ CREATE TABLE IF NOT EXISTS xqy_namespaces (
 );
 EOF
 
-  ingest_csv_to_sqlite $tdir/functions.csv $tdir/xqy.sqlite xqy_functions <<EOF
+  ingest_csv_to_sqlite /tmp/xqanalyze/functions.csv /tmp/xqanalyze/xqy.sqlite xqy_functions <<EOF
 CREATE TABLE IF NOT EXISTS xqy_functions (
+  filename TEXT,
   file TEXT,
   name TEXT,
-  line INTEGER,
-  signature TEXT
+  line INTEGER
 );
 EOF
 
-  ingest_csv_to_sqlite $tdir/invocations.csv $tdir/xqy.sqlite xqy_invocations <<EOF
+  ingest_csv_to_sqlite /tmp/xqanalyze/invocations.csv /tmp/xqanalyze/xqy.sqlite xqy_invocations <<EOF
 CREATE TABLE IF NOT EXISTS xqy_invocations (
+  filename TEXT,
   file TEXT,
   caller TEXT,
   invoked_module TEXT,
@@ -85,15 +87,15 @@ CREATE TABLE IF NOT EXISTS xqy_invocations (
 );
 EOF
 
-  ingest_csv_to_sqlite $tdir/parameters.csv $tdir/xqy.sqlite xqy_parameters <<EOF
+  ingest_csv_to_sqlite /tmp/xqanalyze/parameters.csv /tmp/xqanalyze/xqy.sqlite xqy_parameters <<EOF
 CREATE TABLE IF NOT EXISTS xqy_parameters (
+  filename TEXT,
   file TEXT,
   function_name TEXT,
   parameter TEXT,
   type TEXT
 );
 EOF
-  hh "Found $(wc -l $tdir/xqyfiles.txt) xquery files"
 }
 
 gen_file_list() {
@@ -123,17 +125,6 @@ ingest_csv_to_sqlite() {
     sqlite3 "$db_file" "VACUUM;"
   fi
 
-  # Create the table structure based on CSV columns (assuming header row)
-  sqlite3 "$db_file" <<EOF
-CREATE TABLE IF NOT EXISTS $table_name (
-    abbrev TEXT,
-    namespace TEXT,
-    path TEXT,
-    client TEXT,
-    local TEXT
-);
-EOF
-
   # Import the CSV data into the table (ignoring the first row - the header)
   sqlite3 -separator ',' "$db_file" ".import '$csv_file' $table_name"
 
@@ -148,22 +139,15 @@ EOF
 generate_import_db() {
   hh "Generating import database"
   local index=0
-  local with_header="--with-header=true"
-  local out=/tmp/xqanalyze/out.csv
-
-  for f in $(find /tmp/xqanalyze/ -name "*.json"|head -n 4); do
-    echo "Processing file: $f"
-    set -o xtrace
-    node $REPO_DIR/src/import-rows.js \
-      --file-name=$f \
-      $with_header \
-      >> $out
-    set +o xtrace
-    with_header=""
+  i=1 
+  withHeader=true
+  for f in $(find /tmp/xqanalyze/ -name "*.json"); do
+    echo -n "${i}: Processing file: $f ..."
+    if [ -f "/tmp/xqanalyze/functions.csv" ];then withHeader=false;fi
+    node $REPO_DIR/src/import-rows.js --file-name=$f --with-header=$withHeader
+    echo "done!"
+    i=$((i+1))
   done
-  echo "preview of output"
-  head -n 3 /tmp/xqanalyze/out.csv
-  hh "Total imports: $(wc -l $out)"
 }
 
 check_for_import_names() {
@@ -179,7 +163,7 @@ check_for_import_names() {
 }
 # Create a function to print a message in red with a timestamp prepended
 hh() {
-  echo -e "\033[31m$(date +%H:%M:%S) $1\033[0m"
+  echo -e "\033[33m$(date +%H:%M:%S) $1\033[0m"
 }
 
 main $@
