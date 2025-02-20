@@ -12,13 +12,15 @@ function main() {
     const prefixMap = {};
     prefixMap[namespace.prefix] = namespace.filePath;
     prefixMap['local'] = namespace.filePath;
-    imports.forEach(imp => {
-        prefixMap[imp.namespace.prefix] = imp.namespace.filePath;
-    });
+    imports.forEach(imp => prefixMap[imp.namespace.prefix] = imp.namespace.filePath);
 
-    const functions = extractFunctions(content, relevantPrefixes, prefixMap, namespace.prefix);
+    const functions = extractFunctions(content, relevantPrefixes, prefixMap);
+    const totalFunctions = functions.length;
+    const totalLines = content.split('\n').length;
 
     const result = {
+        totalLines: totalLines,
+        totalFunctions: totalFunctions,
         file: path.basename(fileName),
         path: path.dirname(fileName).replace('./ml-modules/root', ''),
         namespace: namespace,
@@ -29,6 +31,7 @@ function main() {
     if (outDir) {
         const outFileName = path.join(outDir, fileName.replace(/\//g, '_') + '.json');
         fs.writeFileSync(outFileName, JSON.stringify(result, null, 4));
+        console.log(`Output written to ${outFileName}`);
     } else {
         console.log(JSON.stringify(result, null, 4));
     }
@@ -44,14 +47,12 @@ function parseArguments() {
     const fileName = fileNameArg.split('=')[1];
     const outDirArg = args.find(arg => arg.startsWith('--out-dir='));
     const outDir = outDirArg ? outDirArg.split('=')[1] : null;
-
     return [fileName, outDir];
 }
 
 function readFile(fileName) {
     try {
-        const content = fs.readFileSync(fileName, 'utf8');
-        return content;
+        return fs.readFileSync(fileName, 'utf8');
     } catch (err) {
         console.error(`Error reading file ${fileName}:`, err.message);
         process.exit(1);
@@ -69,11 +70,9 @@ function extractNamespace(content, filePath) {
         console.error('No module namespace declaration found.');
         process.exit(1);
     }
-    const namespacePrefix = namespaceMatch[1];
-    const namespaceURI = namespaceMatch[2];
     return {
-        prefix: namespacePrefix,
-        uri: namespaceURI,
+        prefix: namespaceMatch[1],
+        uri: namespaceMatch[2],
         filePath: filePath.replace('./ml-modules/root', '')
     };
 }
@@ -87,10 +86,8 @@ function extractImports(content, filePath) {
         const importDetailsRegex = /namespace\s+["']?([\w\-]+)["']?\s*=\s*"([^"]+)"(?:\s+at\s+"([^"]+)")?\s*;/;
         const detailsMatch = importStatement.match(importDetailsRegex);
         if (detailsMatch) {
-            const pathParts = detailsMatch[3]?.split('/');
-            const usePath = pathParts && pathParts.length === 1
-                ? path.dirname(filePath).replace('./ml-modules/root', '') + '/' + detailsMatch[3]
-                : detailsMatch[3] || null;
+            const usePath = detailsMatch[3] ? (detailsMatch[3].split('/').length === 1 ?
+                path.dirname(filePath).replace('./ml-modules/root', '') + '/' + detailsMatch[3] : detailsMatch[3]) : null;
             imports.push({
                 namespace: {
                     prefix: detailsMatch[1],
@@ -105,61 +102,101 @@ function extractImports(content, filePath) {
 
 function collectRelevantPrefixes(namespacePrefix, imports) {
     const relevantPrefixes = new Set([namespacePrefix, 'local']);
-    imports?.forEach(imp => {
-        relevantPrefixes.add(imp.namespace.prefix);
-    });
+    imports?.forEach(imp => relevantPrefixes.add(imp.namespace.prefix));
     return relevantPrefixes;
 }
 
-function extractFunctions(content, relevantPrefixes, prefixMap, namespacePrefix) {
+function extractFunctions(content, relevantPrefixes, prefixMap) {
     const functions = [];
-    const lines = content.split("\n");
 
-    const functionRegex = /(?:%[\w\-]+(?::[\w\-]+)?\s*)*declare(\s+private)?\s+function\s+([\w\-]+:\w[\w\-]*)\s*\(([^)]*)\)\s*(?:as\s+[^{]+)?\s*\{([\s\S]*?)\};/gm;
+    // Pass 1: Find function start points
+    const startRegex = /declare\s+(private\s+)?function\s+([\w\-]+:\w[\w\-]*)\s*\(/g;
+    const functionStarts = [];
     let match;
-
-    while ((match = functionRegex.exec(content)) !== null) {
-        const privateKeyword = match[1];
-        const fullFunctionName = match[2];
-        const paramList = match[3].trim();
-        const body = match[4].trim();
-
-        const isPrivate = privateKeyword ? true : false;
-
-        const parameters = {};
-        let paramCount = 0;
-        if (paramList) {
-            const paramLines = paramList.split(/\s*,\s*/);
-            paramLines.forEach(param => {
-                const paramParts = param.trim().split(/\s+as\s+/);
-                const paramName = paramParts[0].replace(/^\$/, '');
-                const paramType = paramParts[1] || null;
-                if (paramName) {
-                    parameters[paramName] = paramType;
-                    paramCount++;
-                }
-            });
-        }
-
-        const functionName = `${fullFunctionName}#${paramCount}`;
-
-        const functionStartIndex = match.index;
-        const lineNumber = content.substring(0, functionStartIndex).split("\n").length;
-
-        const invocations = extractInvocations(body, relevantPrefixes, prefixMap);
-
-        functions.push({
-            name: functionName,
-            line: lineNumber,
-            signature: match[0].trim(),
-            body: body,
-            invocations: invocations,
-            parameters: parameters,
-            private: isPrivate
+    while ((match = startRegex.exec(content)) !== null) {
+        functionStarts.push({
+            index: match.index,
+            line: content.substring(0, match.index).split('\n').length,
+            private: !!match[1],
+            name: match[2]
         });
     }
 
+    // Pass 2: Parse each function
+    for (const start of functionStarts) {
+        const functionText = extractFunctionText(content, start.index);
+        if (!functionText) continue;
+
+        const parsedFunction = parseFunction(functionText, start.line, start.private, start.name, relevantPrefixes, prefixMap);
+        if (parsedFunction) {
+            functions.push(parsedFunction);
+        }
+    }
+
     return functions;
+}
+
+function extractFunctionText(content, startIndex) {
+    // Find the opening brace
+    let braceStart = content.indexOf('{', startIndex);
+    if (braceStart === -1) return null;
+
+    // Find matching closing brace
+    let braceCount = 1;
+    let currentIndex = braceStart + 1;
+    while (currentIndex < content.length && braceCount > 0) {
+        const char = content[currentIndex];
+        if (char === '{') braceCount++;
+        else if (char === '}') braceCount--;
+        currentIndex++;
+    }
+
+    if (braceCount !== 0 || currentIndex >= content.length) return null;
+
+    // Ensure the function ends with '};'
+    if (content.substring(currentIndex - 1, currentIndex + 1) !== '};') return null;
+
+    return content.substring(startIndex, currentIndex + 1).trim();
+}
+
+function parseFunction(functionText, lineNumber, isPrivate, fullFunctionName, relevantPrefixes, prefixMap) {
+    // Extract signature and body
+    const braceIndex = functionText.indexOf('{');
+    if (braceIndex === -1) return null;
+
+    const signature = functionText.substring(0, braceIndex).trim();
+    const body = functionText.substring(braceIndex + 1, functionText.length - 2).trim();
+
+    // Parse parameters
+    const paramMatch = signature.match(/\(([^)]*)\)/);
+    const paramList = paramMatch ? paramMatch[1].trim() : '';
+    const parameters = {};
+    let paramCount = 0;
+    if (paramList) {
+        const paramLines = paramList.split(/\s*,\s*/);
+        paramLines.forEach(param => {
+            const paramParts = param.trim().split(/\s+as\s+/);
+            const paramName = paramParts[0].replace(/^\$/, '');
+            const paramType = paramParts[1] || null;
+            if (paramName) {
+                parameters[paramName] = paramType;
+                paramCount++;
+            }
+        });
+    }
+
+    const functionName = `${fullFunctionName}#${paramCount}`;
+    const invocations = extractInvocations(body, relevantPrefixes, prefixMap);
+
+    return {
+        name: functionName,
+        line: lineNumber,
+        signature: signature,
+        body: body,
+        invocations: invocations,
+        parameters: parameters,
+        private: isPrivate
+    };
 }
 
 function extractInvocations(body, relevantPrefixes, prefixMap) {
@@ -173,7 +210,6 @@ function extractInvocations(body, relevantPrefixes, prefixMap) {
         const startIndex = invocationMatch.index;
         const parenStart = body.indexOf('(', startIndex);
 
-        // Find the matching closing parenthesis and extract the argument list
         let openParens = 1;
         let currentIndex = parenStart + 1;
         while (currentIndex < body.length && openParens > 0) {
@@ -183,14 +219,9 @@ function extractInvocations(body, relevantPrefixes, prefixMap) {
             currentIndex++;
         }
 
-        if (openParens !== 0) {
-            // Unmatched parentheses, skip this invocation
-            continue;
-        }
+        if (openParens !== 0) continue;
 
         const argList = body.substring(parenStart + 1, currentIndex - 1).trim();
-
-        // Count top-level commas to determine arity
         let argCount = 0;
         let nestedLevel = 0;
         for (let i = 0; i < argList.length; i++) {
@@ -204,9 +235,7 @@ function extractInvocations(body, relevantPrefixes, prefixMap) {
         if (relevantPrefixes.has(prefix)) {
             const nsKey = prefixMap[prefix] || prefix;
             const fullFunctionName = `${funcName}#${argCount}`;
-            if (!invocations[nsKey]) {
-                invocations[nsKey] = new Set();
-            }
+            if (!invocations[nsKey]) invocations[nsKey] = new Set();
             invocations[nsKey].add(fullFunctionName);
         }
     }

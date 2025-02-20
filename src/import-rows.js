@@ -39,7 +39,9 @@ function processFile(file) {
       file: data.file,
       prefix: data.namespace.prefix,
       uri: data.namespace.uri,
-      filePath: data.namespace.filePath
+      filePath: data.namespace.filePath,
+      numFunctions: data.numFunctions,
+      numFunctions: data.numLines,
     });
   }
   if (data.imports) {
@@ -49,11 +51,13 @@ function processFile(file) {
         file: data.file,
         prefix: imp.namespace.prefix,
         uri: imp.namespace.uri,
-        filePath: imp.namespace.filePath
+        filePath: imp.namespace.filePath,
+        numFunctions: data.totalFunctions,
+        numLines: data.totalLines,
       });
     });
   }
-  outputCSV(nsRows, ['filename', 'file','prefix','uri','filePath'], '/tmp/xqanalyze/namespaces.csv');
+  outputCSV(nsRows, ['filename', 'file','prefix','uri','filePath', 'numFunctions', 'numLines'], '/tmp/xqanalyze/modules.csv');
 
   // --- Functions, Invocations & Parameters ---
   const funcRows = [];
@@ -66,6 +70,7 @@ function processFile(file) {
         file: data.file,
         name: func.name,
         line: func.line,
+        private: func.private
       });
       if (func.invocations) {
         Object.entries(func.invocations).forEach(([modUri, funcs]) => {
@@ -93,7 +98,7 @@ function processFile(file) {
       }
     });
   }
-  outputCSV(funcRows, ['filename', 'file','name','line'], '/tmp/xqanalyze/functions.csv');
+  outputCSV(funcRows, ['filename', 'file','name','line', 'private'], '/tmp/xqanalyze/functions.csv');
   outputCSV(invocRows, ['filename', 'file','caller','invoked_module','invoked_function'], '/tmp/xqanalyze/invocations.csv');
   outputCSV(paramRows, ['filename', 'file','function_name','parameter','type'], '/tmp/xqanalyze/parameters.csv');
 }

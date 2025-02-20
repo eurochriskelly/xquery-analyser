@@ -58,13 +58,15 @@ import_checks() {
   test -f /tmp/xqanalyze/xqy.sqlite && rm /tmp/xqanalyze/xqy.sqlite
   check_for_import_names
   generate_import_db
-  ingest_csv_to_sqlite /tmp/xqanalyze/namespaces.csv /tmp/xqanalyze/xqy.sqlite xqy_namespaces <<EOF
-CREATE TABLE IF NOT EXISTS xqy_namespaces (
+  ingest_csv_to_sqlite /tmp/xqanalyze/namespaces.csv /tmp/xqanalyze/xqy.sqlite xqy_modules <<EOF
+CREATE TABLE IF NOT EXISTS xqy_modules (
   filename TEXT,
   file TEXT,
   prefix TEXT,
   uri TEXT,
-  filePath TEXT
+  filePath TEXT,
+  numFunctions INTEGER,
+  numLines INTEGER
 );
 EOF
 
@@ -73,7 +75,8 @@ CREATE TABLE IF NOT EXISTS xqy_functions (
   filename TEXT,
   file TEXT,
   name TEXT,
-  line INTEGER
+  line INTEGER,
+  private BOOLEAN
 );
 EOF
 
