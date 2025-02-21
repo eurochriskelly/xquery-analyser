@@ -25,6 +25,10 @@ main() {
     option="build_stack"
     ;;
 
+  --build-imports)
+    option="build_imports"
+    ;;
+
   --import-checks | "*")
     option="import_checks"
     ;;
@@ -42,8 +46,21 @@ build_stack() {
     --db /tmp/xqanalyze/xqy.sqlite \
     --interactive
 
-  echo "Number of lines in graph $(cat output.gml|wc -l)"
+  echo "LoC in graph $(cat output.gml|wc -l)"
   mv output.gml /tmp/
+}
+
+build_imports() {
+  echo "Building imports"
+  node $REPO_DIR/src/build-imports.js \
+    --db /tmp/xqanalyze/xqy.sqlite \
+    --remove-isolated
+
+  echo "LoC in graph $(cat imports.gml|wc -l)"
+  if [ -f /tmp/imports.gml ]; then 
+    mv imports.gml /tmp/
+  fi
+
 }
 
 extract_all_functions() {
