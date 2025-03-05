@@ -1,18 +1,16 @@
-# XQuery Analysis Toolset
+# XQuery Call Stack Generator
 
-This repository contains a set of tools for analyzing XQuery (`.xqy`) files, extracting function information, building dependency graphs, and generating call stacks. The tools are written in JavaScript/Node.js and Bash, with data stored in SQLite and output in various formats including JSON, CSV, and GML.
-
-The primary goal of this toolset is to help developers understand and visualize the structure and dependencies within their XQuery codebases, particularly for MarkLogic projects.
+The `xqcheck` tool helps you analyze XQuery (`.xqy`) files in your project by generating function call stack graphs. It’s designed to be simple to use: initialize your project once, then generate call stacks interactively or with specific parameters. Output is provided in GML format, which you can visualize with tools like yEd or Gephi.
 
 ## Installation
 
-To make the `xqanalyze` script available globally (i.e., in your system’s PATH), run the following command from the root directory of the repository:
+To install `xqcheck` and make it available globally (i.e., in your system’s PATH), run the following command from the root directory of this repository:
 
 ```bash
 sudo make install
 ```
 
-This installs `xqanalyze` to `/usr/local/bin`, allowing you to run it from any directory without specifying the full path. Before running this command, ensure the `REPO_DIR` variable in the `src/xqanalyze` script is set to the absolute path of this repository.
+This installs `xqcheck` to `/usr/local/bin`, allowing you to run it from any directory as `xqcheck`. Before running this command, ensure the `REPO_DIR` variable in `src/xqcheck` is set to the absolute path of this repository (e.g., `/home/user/xquery-toolset`).
 
 **Note**: If you haven’t cloned the repository yet, do so first:
 ```bash
@@ -22,12 +20,11 @@ cd <repository-directory>
 
 ## Prerequisites
 
-To use this toolset, you’ll need the following software installed:
-
+To use `xqcheck`, you’ll need:
 - **Node.js**: Version 14 or higher
 - **SQLite3**: For database operations
-- **Bash**: For running the main script
-- **Git**: For retrieving the list of XQuery files
+- **Bash**: For running the script
+- **Git**: To identify `.xqy` files in your repository
 
 Install the required Node.js dependencies by running:
 ```bash
@@ -36,70 +33,85 @@ npm install
 
 ## Usage
 
-The primary entry point is the `xqanalyze` script. After installation, you can run it with various options:
+Run `xqcheck` with or without options to analyze your XQuery project:
 
-- **`--extract-all-functions`**: Extracts function data from all `.xqy` files in the repository.
-- **`--import-checks`**: Processes the extracted data and builds an SQLite database.
-- **`--build-stack`**: Generates a function call graph (interactively or with specified module and function).
-- **`--build-imports`**: Builds a module dependency graph.
-
-For detailed usage of each option, see the sections below.
-
-## Workflow for Building a Function Call Graph
-
-To generate a graph of a function’s call stack, follow these steps:
-
-### Step 1: Extract Function Data
-Run this command to generate JSON files containing function data from all `.xqy` files in your project:
+### Basic Command
 ```bash
-xqanalyze --extract-all-functions
+xqcheck
 ```
-- **What it does**: Processes all `.xqy` files and generates JSON files in `/tmp/xqanalyze/<timestamp>/`.
-- **Why it’s first**: This step prepares the raw data needed for analysis.
+- **If initialized**: Launches an interactive mode to select a module and function, then generates a call stack graph.
+- **If not initialized**: Prompts you to initialize the analysis with “Do you want to run --init? (y/n)”.
 
-### Step 2: Build the Database
-Next, process those JSON files to create a SQLite database:
+### Options
+- **`--init [--verbose]`**: Initializes the analysis by processing all `.xqy` files in your repository. Add `--verbose` to see detailed progress messages.
+- **`--module=<module-name> --function=<function-name>`**: Generates a call stack graph for a specific module and function (e.g., `--module=example.xqy --function=local:func#2`).
+- **`--all <extra-params>`**: Generates a call stack graph with additional parameters (advanced use; consult project documentation for valid parameters).
+- **`--verbose`**: Shows detailed output for non-interactive commands.
+
+## Workflow for Generating a Call Stack Graph
+
+### Step 1: Initialize the Analysis
+Run this command to prepare your project for analysis:
 ```bash
-xqanalyze --import-checks
+xqcheck --init
 ```
-- **What it does**: Converts the JSON files to CSV and ingests them into `/tmp/xqanalyze/xqy.sqlite`.
-- **Why it’s second**: Organizes the data so the tool can use it effectively for graph generation.
+- **What it does**: Clears any previous analysis data and processes all `.xqy` files to create a database at `/tmp/xqanalyze/xqy.sqlite`.
+- **Optional**: Use `--verbose` for more details:
+  ```bash
+  xqcheck --init --verbose
+  ```
+- **Output**: A confirmation message like “Initialization complete. Database created at /tmp/xqanalyze/xqy.sqlite”.
 
-### Step 3: Build the Call Stack Graph
-Finally, generate the function call graph:
+### Step 2: Generate the Call Stack Graph
+After initialization, run:
 ```bash
-xqanalyze --build-stack
+xqcheck
 ```
-- **What it does**: Runs interactively, prompting you to select a module and a function from that module. It then generates a GML file representing the function’s call stack.
-- **Output**: A file named `output.gml` in `/tmp/`, which you can visualize with tools like yEd or Gephi.
+- **What it does**: Starts an interactive session where you:
+  1. Select a module from a list of `.xqy` files.
+  2. Choose a function from that module.
+  3. Generate a call stack graph based on your selection.
+- **Output**: A GML file at `/tmp/output.gml`.
 
-**Important**: The `--interactive` option in `--build-stack` is highly recommended for its ease of use. It guides you through selecting a module and function, preventing errors and simplifying the process.
-
-#### Alternative: Non-Interactive Mode
-If you know the exact module and function ahead of time, you can skip the prompts by running:
+#### Alternative: Specify a Module and Function
+If you know the exact module and function, skip the interactive mode:
 ```bash
-xqanalyze --build-stack --module=<module-name> --function=<function-name>
+xqcheck --module=example.xqy --function=local:func#2
 ```
-However, `--interactive` is often the better choice for its user-friendliness.
+- **Output**: Generates `/tmp/output.gml` directly for the specified function.
 
-## Additional Options
+## Clearing Previous Analysis
+To start fresh (e.g., after updating your `.xqy` files), simply re-run:
+```bash
+xqcheck --init
+```
+This deletes the existing database and rebuilds it.
 
-- **`--extract-functions <file.xqy>`**: Analyzes a single XQuery file and outputs function details to stdout in JSON format. Useful for troubleshooting or inspecting specific files.
-- **`--build-imports`**: Generates a module dependency graph in GML format, saved to `/tmp/imports.gml`. Requires the same first two steps as building a call stack graph.
+## Viewing the Results
+- The output file `/tmp/output.gml` is a graph in GML format.
+- Open it with a graph visualization tool like yEd (free) or Gephi to explore the call stack.
 
 ## Troubleshooting
+- **“No database found”**: Run `xqcheck --init` to create the database.
+- **No prompts appear**: Ensure your terminal supports interactive input and that prerequisites are installed.
+- **Errors during initialization**: Verify `.xqy` files exist in your repository and you have write permissions to `/tmp/xqanalyze/`.
+- **Output file missing**: Check for error messages; ensure the database at `/tmp/xqanalyze/xqy.sqlite` was created successfully.
 
-Here are some common issues and their solutions:
-
-- **Prerequisites not working**: Ensure all required software (Node.js, SQLite3, Bash, Git) is installed and up-to-date.
-- **Permission errors**: Verify that `/tmp/xqanalyze/` is writable by your user.
-- **Graph generation fails**: If `--build-stack` or `--build-imports` fails, make sure you’ve run `--import-checks` first.
-- **Stale data**: To start fresh and remove all temporary files, run:
+## Example Commands
+- Initialize silently:
   ```bash
-  rm -rf /tmp/xqanalyze/
+  xqcheck --init
   ```
-
-## Contributing
-
-Contributions are welcome! Please submit pull requests or open issues for bugs and feature requests on the repository’s Git hosting platform.
+- Initialize with details:
+  ```bash
+  xqcheck --init --verbose
+  ```
+- Generate a call stack interactively:
+  ```bash
+  xqcheck
+  ```
+- Generate a specific call stack:
+  ```bash
+  xqcheck --module=main.xqy --function=local:process#1
+  ```
 
