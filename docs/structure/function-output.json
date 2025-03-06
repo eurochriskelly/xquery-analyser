@@ -98,6 +98,10 @@
                         "type": "string",
                         "description": "Content of the function body"
                     },
+                    "bodySize": {
+                        "type": "integer",
+                        "description": "Lines of code excluding comments and empty lines"
+                    },
                     "invocations": {
                         "type": "object",
                         "description": "Functions invoked within this function, grouped by module path or prefix",
