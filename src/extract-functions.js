@@ -14,7 +14,16 @@ function main() {
     prefixMap['local'] = namespace.filePath;
     imports.forEach(imp => prefixMap[imp.namespace.prefix] = imp.namespace.filePath);
 
-    const functions = extractFunctions(content, relevantPrefixes, prefixMap);
+    const functions = extractFunctions(content, relevantPrefixes, prefixMap).functions;
+
+    if (moduleType === 'main') {
+        const queryBody = extractQueryBody(content);
+        if (queryBody) {
+            const mainFunction = createMainFunction(queryBody, relevantPrefixes, prefixMap, content);
+            functions.push(mainFunction);
+        }
+    }
+
     const totalFunctions = functions.length;
     const totalLines = content.split('\n').length;
 
@@ -77,11 +86,13 @@ function extractNamespace(content, filePath) {
             moduleType: 'library'
         };
     } else {
-        console.warn(`No module namespace declaration found in ${filePath}. Treating as main module.`);
+        const path = dirname(filePath).replace('./ml-modules/root', '');
+        const file = basename(filePath);
+        const uri = `http://example.com${path}/${file}`;
         return {
             namespace: {
-                prefix: 'main',
-                uri: '',
+                prefix: 'local',
+                uri: uri,
                 filePath: filePath.replace('./ml-modules/root', '')
             },
             moduleType: 'main'
@@ -91,7 +102,7 @@ function extractNamespace(content, filePath) {
 
 function extractImports(content, filePath) {
     const imports = [];
-    const importRegex = /import\s+module\s+namespace\s+[\s\S]*?;/gm;
+    const importRegex = /import\s+module\s+namespace\s+[\s\S]*?;/g;
     let importMatch;
     while ((importMatch = importRegex.exec(content)) !== null) {
         const importStatement = importMatch[0];
@@ -120,7 +131,8 @@ function collectRelevantPrefixes(namespacePrefix, imports) {
 
 function extractFunctions(content, relevantPrefixes, prefixMap) {
     const functions = [];
-    const startRegex = /declare\s*([\s\S]*?)\s*function\s+([\w\-\.]+:[\w\-\.]*)\s*\(/gm;
+    const endIndices = [];
+    const startRegex = /declare\s*([\s\S]*?)\s*function\s+([\w\-\.]+:[\w\-\.]*)\s*\(/g;
     let match;
     while ((match = startRegex.exec(content)) !== null) {
         const startIndex = match.index;
@@ -144,22 +156,22 @@ function extractFunctions(content, relevantPrefixes, prefixMap) {
 
         const adjustedStartIndex = annotationStart;
 
-        const functionText = extractFunctionText(content, adjustedStartIndex);
-        if (!functionText) continue;
+        const functionTextWithPositions = extractFunctionTextWithPositions(content, adjustedStartIndex);
+        if (!functionTextWithPositions) continue;
+        const { text: functionText, endIndex } = functionTextWithPositions;
+        endIndices.push(endIndex);
 
         const parsedFunction = parseFunction(functionText, line, isPrivate, name, relevantPrefixes, prefixMap);
         if (parsedFunction) {
             functions.push(parsedFunction);
         }
     }
-
-    return functions;
+    return { functions, endIndices };
 }
 
-function extractFunctionText(content, startIndex) {
+function extractFunctionTextWithPositions(content, startIndex) {
     let braceStart = content.indexOf('{', startIndex);
     if (braceStart === -1) return null;
-
     let braceCount = 1;
     let currentIndex = braceStart + 1;
     while (currentIndex < content.length && braceCount > 0) {
@@ -168,11 +180,10 @@ function extractFunctionText(content, startIndex) {
         else if (char === '}') braceCount--;
         currentIndex++;
     }
-
     if (braceCount !== 0 || currentIndex >= content.length) return null;
     if (content.substring(currentIndex - 1, currentIndex + 1) !== '};') return null;
-
-    return content.substring(startIndex, currentIndex + 1).trim();
+    const text = content.substring(startIndex, currentIndex + 1).trim();
+    return { text, endIndex: currentIndex + 1 };
 }
 
 function parseFunction(functionText, lineNumber, isPrivate, fullFunctionName, relevantPrefixes, prefixMap) {
@@ -289,6 +300,46 @@ function extractInvocations(body, relevantPrefixes, prefixMap) {
         invocationsObj[key] = Array.from(funcSet);
     }
     return invocationsObj;
+}
+
+function extractQueryBody(content) {
+    const declarationRegex = /(?:import\s+module\s+namespace\s+[\s\S]*?;|\s*declare\s+(?:function|variable|option|namespace)\s+[\s\S]*?;\s*)/g;
+    let match;
+    let lastEnd = 0;
+    let queryBody = '';
+
+    while ((match = declarationRegex.exec(content)) !== null) {
+        queryBody += content.substring(lastEnd, match.index);
+        lastEnd = match.index + match[0].length;
+    }
+    queryBody += content.substring(lastEnd);
+
+    return queryBody.trim();
+}
+
+function createMainFunction(queryBody, relevantPrefixes, prefixMap, content) {
+    const name = 'local:MAIN#0';
+    const line = 1; // Starting line for main module body; adjust if needed
+    const signature = 'declare function local:MAIN#0() as item()*';
+    const body = queryBody;
+    const invocations = extractInvocations(body, relevantPrefixes, prefixMap);
+    const parameters = {};
+    const isPrivate = false;
+    const bodyLines = body.split('\n')
+        .map(line => line.trim())
+        .filter(line => !line.startsWith('(:') && line.length > 0);
+    const bodySize = bodyLines.length;
+
+    return {
+        name,
+        line,
+        signature,
+        body,
+        invocations,
+        parameters,
+        private: isPrivate,
+        bodySize
+    };
 }
 
 main();
