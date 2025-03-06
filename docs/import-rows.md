@@ -22,4 +22,13 @@ The typical usage of the tool is as follows:
 ## Command line arguments
 
 Optional arguments:
---with-headers: Include headers in the output
+--with-headers: Includ
+
+## Extended Function View (`extended_xqy_functions`)
+
+This view provides additional calculated metrics useful for graph visualization:
+
+- `numInvocations`: Total historical count of invocations for the function across all analyzed code.
+- `invertedCallCount`: The inverse of the current graph-specific call count, highlighting less frequently called functions.
+- `LoC`: Number of lines in the function.
+- `invertedLoC`: The inverse of `bodyCount`, helping identify overly abstracted functions.e headers in the output

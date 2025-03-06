@@ -114,6 +114,7 @@ function processFile(file) {
         name: func.name,
         line: func.line,
         private: func.private,
+        loc: func.bodySize,
       });
       if (func.invocations) {
         Object.entries(func.invocations).forEach(([modUri, funcs]) => {
@@ -145,7 +146,7 @@ function processFile(file) {
   }
   outputCSV(
     funcRows,
-    ["filename", "file", "name", "line", "private"],
+    ["filename", "file", "name", "line", "private", "loc"],
     "/tmp/xqanalyze/functions.csv",
   );
   outputCSV(

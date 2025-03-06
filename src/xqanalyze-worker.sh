@@ -1,5 +1,7 @@
 #!/bin/bash
+
 export REPO_DIR="@@REPO_DIR@@"
+DB_FILE=/tmp/xqanalyze/xqy.sqlite
 
 ts=$(date +%s)
 tdir=/tmp/xqanalyze/$ts
@@ -43,20 +45,24 @@ main() {
 build_stack() {
   echo "Building stack"
   node $REPO_DIR/src/build-stack.js \
-    --db /tmp/xqanalyze/xqy.sqlite \
+    --db $DB_FILE \
     --interactive
 
   echo "LoC in graph $(cat output.gml|wc -l)"
+  echo "Nodes in graph $(cat output.gml|grep node|wc -l)"
   mv output.gml /tmp/
 }
 
 build_imports() {
   echo "Building imports"
   node $REPO_DIR/src/build-imports.js \
-    --db /tmp/xqanalyze/xqy.sqlite \
+    --db $DB_FILE \
     --remove-isolated
 
   echo "LoC in graph $(cat imports.gml|wc -l)"
+  echo "Nodes in graph $(cat imports.gml|grep node|wc -l)"
+  echo "Max level: $(cat /tmp/output.gml|grep level|grep -v reverse|sort|uniq|sort|awk '{ print $2 }'|sort -n|tail -n 1)"
+
   if [ -f /tmp/imports.gml ]; then 
     mv imports.gml /tmp/
   fi
@@ -88,11 +94,11 @@ extract_functions() {
 import_checks() {
   gen_file_list
   rm /tmp/xqanalyze/*.csv
-  test -f /tmp/xqanalyze/xqy.sqlite && rm /tmp/xqanalyze/xqy.sqlite
+  test -f $DB_FILE && rm $DB_FILE
   check_for_import_names
   generate_import_db
 
-  ingest_csv_to_sqlite /tmp/xqanalyze/modules.csv /tmp/xqanalyze/xqy.sqlite xqy_modules <<EOF
+  ingest_csv_to_sqlite /tmp/xqanalyze/modules.csv $DB_FILE xqy_modules <<EOF
 CREATE TABLE IF NOT EXISTS xqy_modules (
   filename TEXT,
   prefix TEXT,
@@ -101,8 +107,8 @@ CREATE TABLE IF NOT EXISTS xqy_modules (
 );
 
 EOF
-  ingest_csv_to_sqlite /tmp/xqanalyze/imports.csv /tmp/xqanalyze/xqy.sqlite xqy_imports<<EOF
-CREATE TABLE IF NOT EXISTS xqy_modules (
+  ingest_csv_to_sqlite /tmp/xqanalyze/imports.csv $DB_FILE xqy_imports<<EOF
+CREATE TABLE IF NOT EXISTS xqy_imports (
   filename TEXT,
   file TEXT,
   prefix TEXT,
@@ -113,17 +119,18 @@ CREATE TABLE IF NOT EXISTS xqy_modules (
 );
 EOF
 
-  ingest_csv_to_sqlite /tmp/xqanalyze/functions.csv /tmp/xqanalyze/xqy.sqlite xqy_functions <<EOF
+  ingest_csv_to_sqlite /tmp/xqanalyze/functions.csv $DB_FILE xqy_functions <<EOF
 CREATE TABLE IF NOT EXISTS xqy_functions (
   filename TEXT,
   file TEXT,
   name TEXT,
   line INTEGER,
-  private BOOLEAN
+  private BOOLEAN,
+  loc INTEGER,
 );
 EOF
 
-  ingest_csv_to_sqlite /tmp/xqanalyze/invocations.csv /tmp/xqanalyze/xqy.sqlite xqy_invocations <<EOF
+  ingest_csv_to_sqlite /tmp/xqanalyze/invocations.csv $DB_FILE xqy_invocations <<EOF
 CREATE TABLE IF NOT EXISTS xqy_invocations (
   filename TEXT,
   file TEXT,
@@ -133,7 +140,7 @@ CREATE TABLE IF NOT EXISTS xqy_invocations (
 );
 EOF
 
-  ingest_csv_to_sqlite /tmp/xqanalyze/parameters.csv /tmp/xqanalyze/xqy.sqlite xqy_parameters <<EOF
+  ingest_csv_to_sqlite /tmp/xqanalyze/parameters.csv $DB_FILE xqy_parameters <<EOF
 CREATE TABLE IF NOT EXISTS xqy_parameters (
   filename TEXT,
   file TEXT,
@@ -141,6 +148,19 @@ CREATE TABLE IF NOT EXISTS xqy_parameters (
   parameter TEXT,
   type TEXT
 );
+EOF
+
+sqlite3 "$DB_FILE" <<EOF
+DROP VIEW IF EXISTS extended_xqy_functions;
+
+CREATE VIEW extended_xqy_functions AS
+SELECT
+    f.*,
+    (SELECT COUNT(*)
+     FROM xqy_invocations xi 
+     WHERE xi.invoked_function = f.name) AS numInvocations,
+    CASE WHEN f.loc > 0 THEN 1.0 / f.loc ELSE 0 END AS invertedLoc
+FROM xqy_functions f;
 EOF
 
   echo "Modules row count: $(wc -l /tmp/xqanalyze/modules.csv)"

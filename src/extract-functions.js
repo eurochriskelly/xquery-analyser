@@ -239,10 +239,12 @@ function parseFunction(functionText, lineNumber, isPrivate, fullFunctionName, re
             }
         });
     }
-
     const functionName = `${fullFunctionName}#${paramCount}`;
     const invocations = extractInvocations(body, relevantPrefixes, prefixMap);
-
+    const bodyLines = body.split('\n')
+        .map(line => line.trim())
+        .filter(line => !line.startsWith('(:') && line.length > 0);
+    const bodySize = bodyLines.length;
     return {
         name: functionName,
         line: lineNumber,
@@ -250,7 +252,8 @@ function parseFunction(functionText, lineNumber, isPrivate, fullFunctionName, re
         body,
         invocations,
         parameters,
-        private: isPrivate
+        private: isPrivate,
+        bodySize,
     };
 }
 
