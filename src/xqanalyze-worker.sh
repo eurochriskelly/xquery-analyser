@@ -50,6 +50,7 @@ build_stack() {
 
   echo "LoC in graph $(cat output.gml|wc -l)"
   echo "Nodes in graph $(cat output.gml|grep node|wc -l)"
+  echo "Depth of graph $(cat output.gml|grep level|grep -v reverse|sort|uniq|sort|awk '{ print $2 }'|sort -n|tail -n 1)"
   mv output.gml /tmp/
 }
 

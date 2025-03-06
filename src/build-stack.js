@@ -9,7 +9,7 @@ import inquirerAutocompletePrompt from 'inquirer-autocomplete-prompt';
 inquirer.registerPrompt('autocomplete', inquirerAutocompletePrompt);
 
 const argv = yargs(hideBin(process.argv))
-  .option('db', { describe: 'SQLite database file', demandOption: true, type: 'string'   })
+  .option('db', { describe: 'SQLite database file', demandOption: true, type: 'string' })
   .option('module', { describe: 'Starting module filename', type: 'string' })
   .option('function', { describe: 'Starting function with arity', type: 'string' })
   .option('interactive', { describe: 'Run in interactive mode', type: 'boolean', default: false })
@@ -98,8 +98,12 @@ async function selectModuleAndFunction() {
   const selectedModule = module;
 
   // Get list of functions for the selected module
-  const functions = await dbAll('SELECT name FROM xqy_functions WHERE filename = ? ORDER BY name', [selectedModule]);
-  const functionChoices = functions.map(row => row.name);
+  const functions = await dbAll(
+    'SELECT name, loc, invertedLoc FROM extended_xqy_functions WHERE filename = ? ORDER BY name',
+    [selectedModule]
+  );
+  // Return objects with properties: name, loc, invertedLoc
+  const functionChoices = functions.map(row => ({ name: row.name, loc: row.loc, invertedLoc: row.invertedLoc }));
 
   const { func } = await inquirer.prompt({
     type: 'autocomplete',
@@ -107,7 +111,7 @@ async function selectModuleAndFunction() {
     message: 'Select a function (type to filter, arrow keys to navigate):',
     source: async (answersSoFar, input) => {
       input = input || '';
-      return functionChoices.filter(choice => choice.toLowerCase().includes(input.toLowerCase()));
+      return functionChoices.filter(choice => choice.name.toLowerCase().includes(input.toLowerCase()));
     }
   });
 
@@ -125,10 +129,26 @@ async function buildCallStack(selectedModule, selectedFunction) {
   // Add starting node
   const startId = ++idCounter;
   const startBaseName = getBaseFilename(selectedModule);
-  const startLabel = `${startBaseName}/${selectedFunction.split(':')[1]}`;
+
+  // Support both interactive (object) and non-interactive (string) selectedFunction
+  let localFuncName, loc, invertedLoc;
+  if (typeof selectedFunction === 'object') {
+    localFuncName = selectedFunction.name;
+    loc = selectedFunction.loc;
+    invertedLoc = selectedFunction.invertedLoc;
+  } else {
+    const parts = selectedFunction.split(':');
+    localFuncName = parts.length > 1 ? parts[1] : selectedFunction;
+    loc = null;
+    invertedLoc = null;
+  }
+  const prefix = modulesMap.get(selectedModule) || '';
+  const qualifiedFunction = prefix ? `${prefix}:${localFuncName}` : localFuncName;
+  const startLabel = `${startBaseName}/${localFuncName}`;
+
   queue.push({
     filename: selectedModule,
-    function: selectedFunction,
+    function: qualifiedFunction,
     level: 0,
     id: startId,
     calling_id: null,
@@ -137,11 +157,13 @@ async function buildCallStack(selectedModule, selectedFunction) {
   nodes.set(startId, {
     label: startLabel,
     level: 0,
-    function: selectedFunction,
-    filename: selectedModule
+    function: qualifiedFunction,
+    filename: selectedModule,
+    loc: loc,
+    invertedLoc: invertedLoc
   });
-  nodeMap.set(startId, { filename: selectedModule, function: selectedFunction, calling_id: null });
-  functionCallCounts.set(selectedFunction, (functionCallCounts.get(selectedFunction) || 0) + 1);
+  nodeMap.set(startId, { filename: selectedModule, function: qualifiedFunction, calling_id: null });
+  functionCallCounts.set(qualifiedFunction, (functionCallCounts.get(qualifiedFunction) || 0) + 1);
 
   // Process the call stack
   while (queue.length > 0) {
@@ -258,6 +280,8 @@ async function buildCallStack(selectedModule, selectedFunction) {
     gmlContent += `    label "${node.label.replace(/"/g, '\\"')}"\n`;
     gmlContent += `    level ${node.level}\n`;
     gmlContent += `    reverse_level ${node.reverse_level}\n`;
+    gmlContent += `    loc ${node.loc}\n`;
+    gmlContent += `    inverted_loc ${node.invertedLoc}\n`;
     gmlContent += `    call_count ${node.call_count}\n`;
     gmlContent += `    function "${node.function.replace(/"/g, '\\"')}"\n`;
     gmlContent += `    filename "${node.filename.replace(/"/g, '\\"')}"\n`;
