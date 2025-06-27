@@ -36,4 +36,13 @@ install: $(SRCDIR)/$(EXECUTABLE)  ## Install the executable
 clean:  ## Clean build artifacts (no-op)
 	@echo "Nothing to clean"
 
-.PHONY: all install clean
+.PHONY: all install clean serve api
+
+serve: ## Run the API server
+	node src/server.js
+
+api: ## Generate API documentation
+	node src/generate-api-spec.js
+	redoc-cli bundle ./docs/api/swagger.json -o ./docs/api/index.html
+	rm ./docs/api/swagger.json
+

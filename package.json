@@ -13,8 +13,14 @@
   "dependencies": {
     "csv-parser": "^3.2.0",
     "csv-writer": "^1.6.0",
+    "express": "^5.1.0",
     "inquirer": "^9.2.23",
     "inquirer-autocomplete-prompt": "^3.0.1",
     "sqlite3": "^5.1.7"
+  },
+  "devDependencies": {
+    "redoc-cli": "^0.13.21",
+    "swagger-jsdoc": "^6.2.8",
+    "swagger-ui-express": "^5.0.1"
   }
 }
