@@ -1,22 +1,25 @@
 #!/bin/bash
 
 export REPO_DIR="@@REPO_DIR@@"
-DB_FILE=/tmp/xqanalyze/xqy.sqlite
+# DB_FILE is now passed as the second argument to the script
+DB_FILE=$2
+
+hh "DEBUG: xqanalyze-worker.sh received DB_FILE as: $DB_FILE"
 
 ts=$(date +%s)
 tdir=/tmp/xqanalyze/$ts
 
 main() {
-  echo "Running xqanalyze"
+  hh "Running xqanalyze-worker with DB_FILE: $DB_FILE"
 
   case $1 in
   --extract-functions | -x)
     option=extract_functions
-    if [ ! -f $2 ]; then
-      echo "File $2 does not exist"
+    if [ ! -f $3 ]; then # $3 because $2 is DB_FILE
+      hh "File $3 does not exist"
       exit 1
     fi
-    file=$2
+    file=$3
     ;;
 
   --extract-all-functions | -a)
@@ -36,33 +39,33 @@ main() {
     ;;
 
   esac
-  echo "Option: $option"
+  hh "Option: $option"
 
   # Run the function matching the selected option
   $option $file
 }
 
 build_stack() {
-  echo "Building stack"
+  hh "Building stack using DB: $DB_FILE"
   node $REPO_DIR/src/build-stack.js \
     --db $DB_FILE \
     --interactive
 
-  echo "LoC in graph $(cat output.gml|wc -l)"
-  echo "Nodes in graph $(cat output.gml|grep node|wc -l)"
-  echo "Depth of graph $(cat output.gml|grep level|grep -v reverse|sort|uniq|sort|awk '{ print $2 }'|sort -n|tail -n 1)"
+  hh "LoC in graph $(cat output.gml|wc -l)"
+  hh "Nodes in graph $(cat output.gml|grep node|wc -l)"
+  hh "Depth of graph $(cat output.gml|grep level|grep -v reverse|sort|uniq|sort|awk '{ print $2 }'|sort -n|tail -n 1)"
   mv output.gml /tmp/
 }
 
 build_imports() {
-  echo "Building imports"
+  hh "Building imports using DB: $DB_FILE"
   node $REPO_DIR/src/build-imports.js \
     --db $DB_FILE \
     --remove-isolated
 
-  echo "LoC in graph $(cat imports.gml|wc -l)"
-  echo "Nodes in graph $(cat imports.gml|grep node|wc -l)"
-  echo "Max level: $(cat /tmp/output.gml|grep level|grep -v reverse|sort|uniq|sort|awk '{ print $2 }'|sort -n|tail -n 1)"
+  hh "LoC in graph $(cat imports.gml|wc -l)"
+  hh "Nodes in graph $(cat imports.gml|grep node|wc -l)"
+  hh "Max level: $(cat /tmp/output.gml|grep level|grep -v reverse|sort|uniq|sort|awk '{ print $2 }'|sort -n|tail -n 1)"
 
   if [ -f /tmp/imports.gml ]; then 
     mv imports.gml /tmp/
@@ -71,14 +74,14 @@ build_imports() {
 }
 
 extract_all_functions() {
-  echo "Extracting all functions"
+  hh "Extracting all functions"
   if [ -d "$tdir" ]; then rm -rf $tdir;fi
-  echo "Making temp dir $tdir"
+  hh "Making temp dir $tdir"
   mkdir -p $tdir
   gen_file_list
   i=1
   for f in $(cat $tdir/xqyfiles.txt); do
-    echo "${i}: Processing file: $f"
+    hh "${i}: Processing file: $f"
     node $REPO_DIR/src/extract-functions.js \
       --file-name=$f \
       --out-dir=$tdir
@@ -87,19 +90,20 @@ extract_all_functions() {
 }
 
 extract_functions() {
-  echo "Extracting functions"
+  hh "Extracting functions"
   local file=$1
   node $REPO_DIR/src/extract-functions.js --file-name=$file
 }
 
 import_checks() {
+  hh "Running import checks. Database will be created at: $DB_FILE"
   gen_file_list
-  rm /tmp/xqanalyze/*.csv
-  test -f $DB_FILE && rm $DB_FILE
+  rm "$tdir"/*.csv
+  test -f "$DB_FILE" && rm "$DB_FILE" # Ensure DB_FILE is quoted
   check_for_import_names
   generate_import_db
 
-  ingest_csv_to_sqlite /tmp/xqanalyze/modules.csv $DB_FILE xqy_modules <<EOF
+  ingest_csv_to_sqlite "$tdir/modules.csv" "$DB_FILE" xqy_modules <<EOF
 CREATE TABLE IF NOT EXISTS xqy_modules (
   filename TEXT,
   prefix TEXT,
@@ -108,7 +112,7 @@ CREATE TABLE IF NOT EXISTS xqy_modules (
 );
 
 EOF
-  ingest_csv_to_sqlite /tmp/xqanalyze/imports.csv $DB_FILE xqy_imports<<EOF
+  ingest_csv_to_sqlite "$tdir/imports.csv" "$DB_FILE" xqy_imports<<EOF
 CREATE TABLE IF NOT EXISTS xqy_imports (
   filename TEXT,
   file TEXT,
@@ -120,18 +124,18 @@ CREATE TABLE IF NOT EXISTS xqy_imports (
 );
 EOF
 
-  ingest_csv_to_sqlite /tmp/xqanalyze/functions.csv $DB_FILE xqy_functions <<EOF
+  ingest_csv_to_sqlite "$tdir/functions.csv" "$DB_FILE" xqy_functions <<EOF
 CREATE TABLE IF NOT EXISTS xqy_functions (
   filename TEXT,
   file TEXT,
   name TEXT,
   line INTEGER,
   private BOOLEAN,
-  loc INTEGER,
+  loc INTEGER
 );
 EOF
 
-  ingest_csv_to_sqlite /tmp/xqanalyze/invocations.csv $DB_FILE xqy_invocations <<EOF
+  ingest_csv_to_sqlite "$tdir/invocations.csv" "$DB_FILE" xqy_invocations <<EOF
 CREATE TABLE IF NOT EXISTS xqy_invocations (
   filename TEXT,
   file TEXT,
@@ -141,7 +145,7 @@ CREATE TABLE IF NOT EXISTS xqy_invocations (
 );
 EOF
 
-  ingest_csv_to_sqlite /tmp/xqanalyze/parameters.csv $DB_FILE xqy_parameters <<EOF
+  ingest_csv_to_sqlite "$tdir/parameters.csv" "$DB_FILE" xqy_parameters <<EOF
 CREATE TABLE IF NOT EXISTS xqy_parameters (
   filename TEXT,
   file TEXT,
@@ -164,19 +168,22 @@ SELECT
 FROM xqy_functions f;
 EOF
 
-  echo "Modules row count: $(wc -l /tmp/xqanalyze/modules.csv)"
-  echo "Imports row count: $(wc -l /tmp/xqanalyze/imports.csv)"
-  echo "Functions row count: $(wc -l /tmp/xqanalyze/functions.csv)"
-  echo "Invocations row count: $(wc -l /tmp/xqanalyze/invocations.csv)"
-  echo "Parameters row count: $(wc -l /tmp/xqanalyze/parameters.csv)"
+  hh "Modules row count: $(wc -l "$tdir/modules.csv")"
+  hh "Imports row count: $(wc -l "$tdir/imports.csv")"
+  hh "Functions row count: $(wc -l "$tdir/functions.csv")"
+  hh "Invocations row count: $(wc -l "$tdir/invocations.csv")"
+  hh "Parameters row count: $(wc -l "$tdir/parameters.csv")"
 }
 
 gen_file_list() {
-  git ls-files | grep "\.xqy$" >$tdir/xqyfiles.txt
+  hh "Generating file list from git"
+  git ls-files | grep "\.xqy$" >"$tdir/xqyfiles.txt"
 }
 extract_functions() {
   local file=$1
-  node $REPO_DIR/src/extract-functions.js --file-name=$file
+  node $REPO_DIR/src/extract-functions.js \
+    --file-name="$file" \
+    --out-dir="$tdir"
 }
 
 # Function to ingest CSV into SQLite
@@ -186,48 +193,55 @@ ingest_csv_to_sqlite() {
   local db_file=$2
   local table_name=$3
 
+  hh "Inside ingest_csv_to_sqlite: csv_file='$csv_file', db_file='$db_file', table_name='$table_name'"
+
   # Check if the CSV file exists
   if [[ ! -f "$csv_file" ]]; then
-    echo "CSV file '$csv_file' does not exist."
+    hh "CSV file '$csv_file' does not exist."
     return 1
   fi
 
   # Check if the database file exists, if not, create it
   if [[ ! -f "$db_file" ]]; then
-    echo "Database file '$db_file' does not exist, creating new database..."
+    hh "Database file '$db_file' does not exist, creating new database..."
+    hh "DEBUG: Attempting to create database at: $db_file"
     sqlite3 "$db_file" "VACUUM;"
   fi
 
   # Import the CSV data into the table (ignoring the first row - the header)
+  hh "Importing '$csv_file' into '$db_file' table '$table_name'"
+  hh "DEBUG: Running sqlite3 import command for db_file: $db_file"
   sqlite3 -separator ',' "$db_file" ".import '$csv_file' $table_name"
 
-  echo "Data successfully ingested into '$db_file' table '$table_name'."
-  echo "To open with sqlitestudio, run 'sqlitestudio $dbfile'"
+  hh "Data successfully ingested into '$db_file' table '$table_name'."
+  hh "To open with sqlitestudio, run 'sqlitestudio $db_file'"
 }
 
 generate_import_db() {
-  hh "Generating import database"
+  hh "Generating import database from JSON files"
   local index=0
   i=1 
   withHeader=true
-  for f in $(find /tmp/xqanalyze/ -name "*.json"); do
-    echo -n "${i}: Processing file: $f ..."
-    if [ -f "/tmp/xqanalyze/functions.csv" ];then withHeader=false;fi
-    node $REPO_DIR/src/import-rows.js --file-name=$f --with-header=$withHeader
-    echo "done!"
+  for f in $(find "$tdir" -name "*.json"); do
+    hh "${i}: Processing file: $f ..."
+    if [ -f "$tdir/functions.csv" ];then withHeader=false;fi
+    node $REPO_DIR/src/import-rows.js \
+      --file-name="$f" \
+      --with-header=$withHeader \
+      --out-dir="$tdir"
     i=$((i+1))
   done
 }
 
 check_for_import_names() {
   getmods() {
-    for f in $(cat $tdir/xqyfiles.txt); do
-      cat $f | grep "^module namespace" | awk '{print $3}' | awk -F= '{print $1}'
+    for f in $(cat "$tdir/xqyfiles.txt"); do
+      cat "$f" | grep "^module namespace" | awk '{print $3}' | awk -F= '{print $1}'
     done
   }
   hh "Found the following module namespaces:"
   getmods | sort | uniq -c | while read count name; do
-    echo "  $name ($count instances)"
+    hh "  $name ($count instances)"
   done
 }
 # Create a function to print a message in red with a timestamp prepended

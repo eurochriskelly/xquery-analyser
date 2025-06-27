@@ -24,5 +24,6 @@ export default (req, res) => {
         return res.status(400).send('Missing folder parameter');
     }
     config.basePath = folder;
+    console.log(`[${new Date().toISOString()}] Base path set to: ${config.basePath}`);
     res.send(`Base path set to ${config.basePath}`);
 };

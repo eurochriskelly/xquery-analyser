@@ -22,6 +22,7 @@ const argv = yargs(hideBin(process.argv))
   .argv;
 
 // Connect to the database
+console.log(`[build-stack.js] Database path received: ${argv.db}`);
 const db = new sqlite3.Database(argv.db, sqlite3.OPEN_READONLY, (err) => {
   if (err) {
     console.error('Error connecting to database:', err.message);

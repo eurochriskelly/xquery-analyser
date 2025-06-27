@@ -1,9 +1,11 @@
 import { readFileSync, createWriteStream } from "fs";
+import path from 'path';
 
 // Command-line arguments parsing
 const args = process.argv.slice(2);
 let fileName;
 let withHeader = false;
+let outDir = '/tmp/xqanalyze'; // Default output directory
 
 args.forEach((arg) => {
   const [key, value] = arg.split("=");
@@ -14,10 +16,15 @@ args.forEach((arg) => {
     case "--with-header":
       withHeader = value === "true";
       break;
+    case "--out-dir":
+      outDir = value;
+      break;
     default:
       console.warn(`Unknown argument: ${key}`);
   }
 });
+
+console.log(`[import-rows.js] Output directory for CSVs: ${outDir}`);
 
 if (!fileName) {
   console.error("Error: Please provide --file-name argument");
@@ -56,7 +63,7 @@ function processFile(file) {
       "numFunctions",
       "numLines",
     ],
-    "/tmp/xqanalyze/modules.csv",
+    path.join(outDir, "modules.csv"),
   );
 
   // --- Imports (one record per import) ---
@@ -100,7 +107,7 @@ function processFile(file) {
   outputCSV(
     importRows,
     ["filename", "prefix", "uri", "filePath"],
-    "/tmp/xqanalyze/imports.csv",
+    path.join(outDir, "imports.csv"),
   );
   // --- Functions, Invocations & Parameters ---
   const funcRows = [];
@@ -147,17 +154,17 @@ function processFile(file) {
   outputCSV(
     funcRows,
     ["filename", "file", "name", "line", "private", "loc"],
-    "/tmp/xqanalyze/functions.csv",
+    path.join(outDir, "functions.csv"),
   );
   outputCSV(
     invocRows,
     ["filename", "file", "caller", "invoked_module", "invoked_function"],
-    "/tmp/xqanalyze/invocations.csv",
+    path.join(outDir, "invocations.csv"),
   );
   outputCSV(
     paramRows,
     ["filename", "file", "function_name", "parameter", "type"],
-    "/tmp/xqanalyze/parameters.csv",
+    path.join(outDir, "parameters.csv"),
   );
 }
 

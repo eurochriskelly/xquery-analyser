@@ -14,6 +14,7 @@ import { config } from '../../config.js';
  *         description: Error during initialization.
  */
 export default (req, res) => {
+    console.log(`[${new Date().toISOString()}] Initializing analysis for basePath: ${config.basePath}`);
     exec(`cd ${config.basePath} && xqanalyze --init`, (error, stdout, stderr) => {
         if (error) {
             console.error(`exec error: ${error}`);

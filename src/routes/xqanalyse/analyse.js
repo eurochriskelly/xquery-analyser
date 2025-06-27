@@ -29,6 +29,7 @@ import { config } from '../../config.js';
  *         description: Error during analysis.
  */
 export default (req, res) => {
+    console.log(`[${new Date().toISOString()}] Analyzing function for basePath: ${config.basePath}`);
     const { module, function: func } = req.query;
     if (!module || !func) {
         return res.status(400).send('Missing module or function parameter');

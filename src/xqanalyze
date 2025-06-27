@@ -1,7 +1,7 @@
 #!/bin/bash
 export REPO_DIR="@@REPO_DIR@@"
 
-DB_PATH="/tmp/xqanalyze/xqy.sqlite"
+DB_PATH="$(pwd)/xqanalyse.db"
 VERBOSE=false
 MODULE=""
 FUNCTION=""
@@ -39,14 +39,15 @@ while [[ "$#" -gt 0 ]]; do
 done
 
 main() {
-  echo "Running xqcheck"
+  hh "Running xqanalyze from $(pwd)"
+  hh "Using database path: $DB_PATH"
 
   if [ "$INIT" == "true" ]; then
     run_init
   elif [ -f "$DB_PATH" ]; then
     run_build_stack
   else
-    echo "No database found at $DB_PATH"
+    hh "No database found at $DB_PATH"
     echo "Do you want to run --init? (y/n)"
     read -r response
     if [ "$response" == "y" ] || [ "$response" == "Y" ]; then
@@ -59,7 +60,8 @@ main() {
 }
 
 run_init() {
-  hh "Initializing analysis"
+  hh "Initializing analysis in $(pwd)"
+  hh "Database will be created at: $DB_PATH"
   # Delete existing directory
   rm -rf /tmp/xqanalyze/
   mkdir -p /tmp/xqanalyze/
@@ -67,12 +69,12 @@ run_init() {
   # Run the equivalent of --extract-all-functions and --import-checks
   if [ "$VERBOSE" == "true" ]; then
     hh "Extracting functions from all .xqy files..."
-    /usr/local/bin/xqanalyze-worker --extract-all-functions
+    /usr/local/bin/xqanalyze-worker --extract-all-functions "$DB_PATH"
     hh "Building database..."
-    /usr/local/bin/xqanalyze-worker --import-checks
+    /usr/local/bin/xqanalyze-worker --import-checks "$DB_PATH"
   else
-    /usr/local/bin/xqanalyze-worker --extract-all-functions > /dev/null 2>&1
-    /usr/local/bin/xqanalyze-worker --import-checks > /dev/null 2>&1
+    /usr/local/bin/xqanalyze-worker --extract-all-functions "$DB_PATH" > /dev/null 2>&1
+    /usr/local/bin/xqanalyze-worker --import-checks "$DB_PATH" > /dev/null 2>&1
   fi
 
   if [ $? -eq 0 ]; then
@@ -84,7 +86,7 @@ run_init() {
 }
 
 run_build_stack() {
-  hh "Building function call stack"
+  hh "Building function call stack using database: $DB_PATH"
   local cmd="/usr/local/bin/xqanalyze-worker --build-stack"
 
   # Construct the command based on parameters
@@ -94,7 +96,8 @@ run_build_stack() {
     cmd="$cmd $EXTRA_PARAMS"
   else
     # Interactive mode: always show output
-    /usr/local/bin/xqanalyze-worker --build-stack --interactive
+    hh "Running interactive build stack..."
+    /usr/local/bin/xqanalyze-worker --build-stack "$DB_PATH" --interactive
     if [ $? -eq 0 ]; then
       hh "Call stack generated successfully. Output at /tmp/output.gml"
     else
@@ -106,9 +109,9 @@ run_build_stack() {
 
   # Non-interactive mode: apply verbose setting
   if [ "$VERBOSE" == "true" ]; then
-    eval "$cmd"
+    eval "$cmd \"$DB_PATH\""
   else
-    eval "$cmd > /dev/null 2>&1"
+    eval "$cmd \"$DB_PATH\" > /dev/null 2>&1"
   fi
 
   if [ $? -eq 0 ]; then

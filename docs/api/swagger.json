@@ -1,0 +1,87 @@
+{
+  "openapi": "3.0.0",
+  "info": {
+    "title": "XQuery Analyser API",
+    "version": "1.0.0",
+    "description": "An API for running XQuery analysis commands."
+  },
+  "paths": {
+    "/xqanalyse/analyse": {
+      "put": {
+        "summary": "Analyse a function",
+        "description": "Generates a call stack graph for a specific function in a module.",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "module",
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "description": "The module to analyze."
+          },
+          {
+            "in": "query",
+            "name": "function",
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "description": "The function to analyze."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Analysis successful."
+          },
+          "400": {
+            "description": "Missing module or function parameter."
+          },
+          "500": {
+            "description": "Error during analysis."
+          }
+        }
+      }
+    },
+    "/xqanalyse/base": {
+      "put": {
+        "summary": "Set the base folder for analysis",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "folder",
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "description": "The absolute path to the folder to operate on."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Base path set successfully."
+          },
+          "400": {
+            "description": "Missing folder parameter."
+          }
+        }
+      }
+    },
+    "/xqanalyse/init": {
+      "put": {
+        "summary": "Initialize the database",
+        "description": "Analyzes the codebase and generates an SQLite database. This can take a minute or two.",
+        "responses": {
+          "200": {
+            "description": "Initialization successful."
+          },
+          "500": {
+            "description": "Error during initialization."
+          }
+        }
+      }
+    }
+  },
+  "components": {},
+  "tags": []
+}
