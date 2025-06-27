@@ -1,17 +1,22 @@
 #!/bin/bash
 export REPO_DIR="@@REPO_DIR@@"
 
-DB_PATH="$(pwd)/xqanalyse.db"
+DB_PATH=""
 VERBOSE=false
 MODULE=""
 FUNCTION=""
 ALL=false
+BASE_FOLDER=""
 
 # Parse command-line arguments
 while [[ "$#" -gt 0 ]]; do
   case $1 in
     --init)
       INIT=true
+      shift
+      ;;
+    --base-folder=*)
+      BASE_FOLDER="${1#*=}"
       shift
       ;;
     --verbose)
@@ -39,6 +44,16 @@ while [[ "$#" -gt 0 ]]; do
 done
 
 main() {
+  if [ -n "$BASE_FOLDER" ]; then
+    if [ -d "$BASE_FOLDER" ]; then
+      cd "$BASE_FOLDER"
+    else
+      echo "Error: Base folder '$BASE_FOLDER' does not exist."
+      exit 1
+    fi
+  fi
+  DB_PATH="$(pwd)/xqanalyse.db"
+
   hh "Running xqanalyze from $(pwd)"
   hh "Using database path: $DB_PATH"
 

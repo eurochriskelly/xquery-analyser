@@ -15,7 +15,7 @@ import { config } from '../../config.js';
  */
 export default (req, res) => {
     console.log(`[${new Date().toISOString()}] Initializing analysis for basePath: ${config.basePath}`);
-    exec(`cd ${config.basePath} && xqanalyze --init`, (error, stdout, stderr) => {
+    exec(`xqanalyze --init --base-folder="${config.basePath}"`, (error, stdout, stderr) => {
         if (error) {
             console.error(`exec error: ${error}`);
             return res.status(500).send(stderr);
