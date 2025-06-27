@@ -176,8 +176,8 @@ EOF
 }
 
 gen_file_list() {
-  hh "Generating file list from git"
-  git ls-files | grep "\.xqy$" >"$tdir/xqyfiles.txt"
+  hh "Generating file list from current directory using find"
+  find . -name "*.xqy" >"$tdir/xqyfiles.txt"
 }
 extract_functions() {
   local file=$1
