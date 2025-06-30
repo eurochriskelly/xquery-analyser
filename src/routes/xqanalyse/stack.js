@@ -24,7 +24,7 @@ import { config } from '../../config.js';
  *     responses:
  *       200:
  *         description: A JSON object containing the filtered functions and invocations for the requested call stack.
- *         content:c
+ *         content:
  *           application/json:
  *             schema:
  *               $ref: '#/components/schemas/CallStackData'
