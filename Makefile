@@ -15,23 +15,20 @@ help:  ## Show this help message
 # Default target
 all: install  ## Alias for install target
 
-install: $(SRCDIR)/$(EXECUTABLE)  ## Install the executable
+install:  ## Install the executable
 	@echo "Replacing @@REPO_DIR@@ with the current directory path..."
-	@sed 's|@@REPO_DIR@@|$(REPO_DIR)|g' $(SRCDIR)/$(EXECUTABLE) > /tmp/$(EXECUTABLE)_tmp
 	@sed 's|@@REPO_DIR@@|$(REPO_DIR)|g' $(SRCDIR)/$(EXECUTABLE)-worker.sh > /tmp/$(EXECUTABLE)-worker_tmp
-	@chmod +x /tmp/$(EXECUTABLE)_tmp /tmp/$(EXECUTABLE)-worker_tmp
+	@chmod +x /tmp/$(EXECUTABLE)-worker_tmp
 	@SUDO=; \
 	if [ ! -w $(DESTDIR)$(BINDIR) ]; then \
 		SUDO=sudo; \
 	fi; \
-	echo "Copying $(EXECUTABLE) to $(DESTDIR)$(BINDIR)..."; \
-	$$SUDO install -d $(DESTDIR)$(BINDIR); \
-	$$SUDO install -m 755 /tmp/$(EXECUTABLE)_tmp $(DESTDIR)$(BINDIR)/$(EXECUTABLE); \
 	echo "Copying $(EXECUTABLE)-worker to $(DESTDIR)$(BINDIR)..."; \
+	$$SUDO install -d $(DESTDIR)$(BINDIR); \
 	$$SUDO install -m 755 /tmp/$(EXECUTABLE)-worker_tmp $(DESTDIR)$(BINDIR)/$(EXECUTABLE)-worker; \
 	echo "Cleaning up temporary files..."; \
-	rm -f /tmp/$(EXECUTABLE)_tmp /tmp/$(EXECUTABLE)-worker_tmp; \
-	echo "Installation complete: $(DESTDIR)$(BINDIR)/$(EXECUTABLE) and $(EXECUTABLE)-worker"
+	rm -f /tmp/$(EXECUTABLE)-worker_tmp; \
+	echo "Installation complete: $(DESTDIR)$(BINDIR)/$(EXECUTABLE)-worker"
 
 clean:  ## Clean build artifacts (no-op)
 	@echo "Nothing to clean"

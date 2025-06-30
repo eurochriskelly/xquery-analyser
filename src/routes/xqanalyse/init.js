@@ -13,13 +13,14 @@ import { config } from '../../config.js';
  *       500:
  *         description: Error during initialization.
  */
-export default (req, res) => {
+import { runInit } from './init-worker.js';
+
+export default async (req, res) => {
     console.log(`[${new Date().toISOString()}] Initializing analysis for basePath: ${config.basePath}`);
-    exec(`xqanalyze --init --base-folder="${config.basePath}"`, (error, stdout, stderr) => {
-        if (error) {
-            console.error(`exec error: ${error}`);
-            return res.status(500).send(stderr);
-        }
-        res.send(stdout);
-    });
+    try {
+        const result = await runInit();
+        res.send(result);
+    } catch (error) {
+        res.status(500).send(error);
+    }
 };

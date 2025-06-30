@@ -6,8 +6,13 @@ DB_FILE=$2
 
 hh "DEBUG: xqanalyze-worker.sh received DB_FILE as: $DB_FILE"
 
-ts=$(date +%s)
-tdir=/tmp/xqanalyze/$ts
+# Check if a temporary directory is provided as an argument
+if [ -n "$3" ]; then
+  tdir=$3
+else
+  ts=$(date +%s)
+  tdir=/tmp/xqanalyze/$ts
+fi
 
 main() {
   hh "Running xqanalyze-worker with DB_FILE: $DB_FILE"

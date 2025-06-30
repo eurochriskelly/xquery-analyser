@@ -7,6 +7,7 @@ import baseRoute from './routes/xqanalyse/base.js';
 import initRoute from './routes/xqanalyse/init.js';
 import modulesRoute from './routes/xqanalyse/modules.js';
 import functionsRoute from './routes/xqanalyse/functions.js';
+import stackRoute from './routes/xqanalyse/stack.js';
 import statusRoute from './routes/xqanalyse/status.js';
 
 const app = express();
@@ -40,6 +41,7 @@ app.put('/xqanalyse/base', baseRoute);
 app.put('/xqanalyse/init', initRoute);
 app.get('/xqanalyse/modules', modulesRoute);
 app.get('/xqanalyse/functions', functionsRoute);
+app.get('/xqanalyse/stack', stackRoute);
 app.get('/xqanalyse/status', statusRoute);
 
 app.listen(port, () => {
