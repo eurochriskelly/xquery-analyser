@@ -42,7 +42,7 @@ export default async (req, res) => {
 
     if (!moduleIdentifier || !funcIdentifier) {
         db.close();
-        return res.status(400).send('Missing module or function parameter.');
+        return res.status(400).json({ error: 'Missing module or function parameter.' });
     }
 
     try {
@@ -93,14 +93,14 @@ export default async (req, res) => {
 
         let foundMatch = false;
         for (const f of allFunctions) {
-            const moduleMatch = f.filename === moduleIdentifier;
+            const moduleMatch = f.file === moduleIdentifier;
             const nameMatch = f.name === funcIdentifier;
             
             if (moduleMatch && nameMatch) {
                 foundMatch = true;
             }
             console.log(`  Comparing:`);
-            console.log(`    DB Filename: '${f.filename}' (Type: ${typeof f.filename}) - Match: ${moduleMatch}`);
+            console.log(`    Module Path: '${f.file}' (Type: ${typeof f.file}) - Match: ${moduleMatch}`);
             console.log(`    DB Name:     '${f.name}' (Type: ${typeof f.name}) - Match: ${nameMatch}`);
             console.log(`    Overall Match: ${moduleMatch && nameMatch}
 `);
@@ -111,11 +111,11 @@ export default async (req, res) => {
 
         // 3. Find the root function
         const rootFunction = allFunctions.find(f =>
-            f.filename === moduleIdentifier && f.name === funcIdentifier
+            f.file === moduleIdentifier && f.name === funcIdentifier
         );
 
         if (!rootFunction) {
-            return res.status(404).send(`Function '${funcIdentifier}' in module '${moduleIdentifier}' not found.`);
+            return res.status(404).json({ error: `Function '${funcIdentifier}' in module '${moduleIdentifier}' not found.` });
         }
 
         // 4. Build the filtered call stack using a robust traversal algorithm
@@ -196,7 +196,7 @@ export default async (req, res) => {
 
     } catch (err) {
         console.error(err);
-        res.status(500).send(err.message);
+        res.status(500).json({ error: err.message });
     } finally {
         db.close();
     }
