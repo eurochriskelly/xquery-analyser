@@ -84,30 +84,6 @@ export default async (req, res) => {
             };
         });
 
-        // --- START DIAGNOSTIC LOGGING FOR ROOT FUNCTION --- 
-        console.log(`
---- Root Function Lookup Diagnostics ---`);
-        console.log(`Request Module Identifier: '${moduleIdentifier}' (Type: ${typeof moduleIdentifier})`);
-        console.log(`Request Function Identifier: '${funcIdentifier}' (Type: ${typeof funcIdentifier})
-`);
-
-        let foundMatch = false;
-        for (const f of allFunctions) {
-            const moduleMatch = f.file === moduleIdentifier;
-            const nameMatch = f.name === funcIdentifier;
-            
-            if (moduleMatch && nameMatch) {
-                foundMatch = true;
-            }
-            console.log(`  Comparing:`);
-            console.log(`    Module Path: '${f.file}' (Type: ${typeof f.file}) - Match: ${moduleMatch}`);
-            console.log(`    DB Name:     '${f.name}' (Type: ${typeof f.name}) - Match: ${nameMatch}`);
-            console.log(`    Overall Match: ${moduleMatch && nameMatch}
-`);
-        }
-        console.log(`--- End Root Function Lookup Diagnostics ---
-`);
-        // --- END DIAGNOSTIC LOGGING FOR ROOT FUNCTION --- 
 
         // 3. Find the root function
         const rootFunction = allFunctions.find(f =>
@@ -115,7 +91,20 @@ export default async (req, res) => {
         );
 
         if (!rootFunction) {
-            return res.status(404).json({ error: `Function '${funcIdentifier}' in module '${moduleIdentifier}' not found.` });
+            const functionsInModule = allFunctions
+                .filter(f => f.file === moduleIdentifier)
+                .map(f => f.name);
+            
+            const message = `Function '${funcIdentifier}' in module '${moduleIdentifier}' not found.`;
+
+            if (functionsInModule.length > 0) {
+                return res.status(404).json({ 
+                    error: message,
+                    available_functions: functionsInModule
+                });
+            } else {
+                return res.status(404).json({ error: `${message} The module was not found or contains no functions.` });
+            }
         }
 
         // 4. Build the filtered call stack using a robust traversal algorithm
