@@ -1,3 +1,4 @@
+import path from 'path';
 import sqlite3 from 'sqlite3';
 import { config } from '../../config.js';
 
@@ -53,6 +54,11 @@ export default async (req, res) => {
             });
         });
 
+        const resolveRelativePath = (sourceFilename, relativePath) => {
+            const sourceDir = path.posix.dirname(sourceFilename);
+            return path.posix.resolve(sourceDir, relativePath);
+        };
+
         // 1. Fetch all data from the database
         const rawFunctions = await dbAll('SELECT * FROM extended_xqy_functions');
         const allInvocations = await dbAll('SELECT * FROM xqy_invocations');
@@ -72,29 +78,35 @@ export default async (req, res) => {
 
         const allFunctions = rawFunctions.map(f => {
             const baseName = f.name.split('#')[0];
-            const parameters = allParameters.filter(p => p.filename === f.filename && p.function_name.split('#')[0] === baseName);
-            const arity = parameters.length;
-            const module = modulesByFilename.get(f.filename);
+            const functionParameters = allParameters
+                .filter(p => p.filename === f.filename && p.function_name.split('#')[0] === baseName)
+                .map(p => ({ name: p.parameter, type: p.type }));
+            
+            const arity = functionParameters.length;
+
             return {
-                ...f,
-                file: f.filename, // Use the function's own filename as the logical path
-                baseName: baseName, // Original name without arity
-                name: `${baseName}#${arity}`, // Fully qualified name with arity
+                filePath: f.filename,
+                name: baseName,
                 arity: arity,
-                parameters: parameters
+                line: f.line ? parseInt(f.line, 10) : null,
+                private: f.private === 1,
+                loc: f.loc ? parseInt(f.loc, 10) : null,
+                numInvocations: f.numInvocations ? parseInt(f.numInvocations, 10) : 0,
+                invertedLoc: f.invertedLoc,
+                parameters: functionParameters,
+                internal_name: `${baseName}#${arity}`
             };
         });
 
-
         // 3. Find the root function
         const rootFunction = allFunctions.find(f =>
-            f.file === moduleIdentifier && f.name === funcIdentifier
+            f.filePath === moduleIdentifier && f.internal_name === funcIdentifier
         );
 
         if (!rootFunction) {
             const functionsInModule = allFunctions
-                .filter(f => f.file === moduleIdentifier)
-                .map(f => f.name);
+                .filter(f => f.filePath === moduleIdentifier)
+                .map(f => f.internal_name);
             
             const message = `Function '${funcIdentifier}' in module '${moduleIdentifier}' not found.`;
 
@@ -113,19 +125,17 @@ export default async (req, res) => {
             const stackFunctions = new Map();
             const stackInvocations = new Set();
             const queue = [rootFunc];
-            const visited = new Set([rootFunc.name]);
+            const visited = new Set([rootFunc.internal_name]);
 
             while (queue.length > 0) {
                 const currentFunc = queue.shift();
-                stackFunctions.set(currentFunc.name, currentFunc);
+                stackFunctions.set(currentFunc.internal_name, currentFunc);
 
                 const childrenInvocations = allInvocations.filter(inv =>
-                    inv.caller === currentFunc.name && inv.filename === currentFunc.filename
+                    inv.caller === currentFunc.internal_name && inv.filename === currentFunc.filePath
                 );
 
                 for (const inv of childrenInvocations) {
-                    stackInvocations.add(inv);
-
                     let invokedModuleFilename = null;
 
                     if (inv.invoked_module === null) { // Call within the same module (local:)
@@ -134,30 +144,32 @@ export default async (req, res) => {
                         invokedModuleFilename = inv.invoked_module;
                     } else { // invoked_module is a prefix, need to resolve
                         const currentModule = modulesByFilename.get(inv.filename);
-                        // Case 1: prefix is the current module's own prefix
                         if (currentModule && currentModule.prefix === inv.invoked_module) {
                             invokedModuleFilename = inv.filename;
                         } else {
-                            // Case 2: prefix is from an imported module
                             const importMap = importsMap.get(inv.filename);
                             if (importMap && importMap.has(inv.invoked_module)) {
-                                const importedFilePath = importMap.get(inv.invoked_module);
-                                const importedModule = allModules.find(m => m.filePath === importedFilePath);
-                                if (importedModule) {
-                                    invokedModuleFilename = importedModule.filename;
-                                }
+                                const importedRelativePath = importMap.get(inv.invoked_module);
+                                invokedModuleFilename = resolveRelativePath(inv.filename, importedRelativePath);
                             }
                         }
                     }
 
                     if (invokedModuleFilename) {
+                        stackInvocations.add({
+                            callerFilePath: inv.filename,
+                            caller: inv.caller,
+                            invokedFilePath: invokedModuleFilename,
+                            invokedFunction: inv.invoked_function
+                        });
+
                         const childFuncs = allFunctions.filter(f =>
-                            f.filename === invokedModuleFilename && f.baseName === inv.invoked_function
+                            f.filePath === invokedModuleFilename && f.name === inv.invoked_function
                         );
 
                         for (const childFunc of childFuncs) {
-                            if (!visited.has(childFunc.name)) {
-                                visited.add(childFunc.name);
+                            if (!visited.has(childFunc.internal_name)) {
+                                visited.add(childFunc.internal_name);
                                 queue.push(childFunc);
                             }
                         }
@@ -174,13 +186,41 @@ export default async (req, res) => {
         const callStack = getCallStack(rootFunction);
 
         const finalFunctions = callStack.functions.map(f => {
-            const { baseName, arity, ...rest } = f;
-            return { ...rest, name: baseName };
+            const { internal_name, ...rest } = f;
+            return rest;
         });
+
+        const finalInvocations = [];
+        for (const inv of callStack.invocations) {
+            const [callerName, callerArityStr] = inv.caller.split('#');
+            const invokedFuncs = allFunctions.filter(f => f.filePath === inv.invokedFilePath && f.name === inv.invokedFunction);
+
+            if (invokedFuncs.length > 0) {
+                for (const invokedFunc of invokedFuncs) {
+                    finalInvocations.push({
+                        callerFilePath: inv.callerFilePath,
+                        callerName: callerName,
+                        callerArity: parseInt(callerArityStr, 10),
+                        invokedFilePath: inv.invokedFilePath,
+                        invokedName: invokedFunc.name,
+                        invokedArity: invokedFunc.arity
+                    });
+                }
+            } else {
+                finalInvocations.push({
+                    callerFilePath: inv.callerFilePath,
+                    callerName: callerName,
+                    callerArity: parseInt(callerArityStr, 10),
+                    invokedFilePath: inv.invokedFilePath,
+                    invokedName: inv.invokedFunction,
+                    invokedArity: null
+                });
+            }
+        }
 
         res.json({
             functions: finalFunctions,
-            invocations: callStack.invocations
+            invocations: finalInvocations
         });
 
     } catch (err) {
