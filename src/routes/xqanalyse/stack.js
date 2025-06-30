@@ -118,38 +118,35 @@ export default async (req, res) => {
             while (queue.length > 0) {
                 const currentFunc = queue.shift();
                 stackFunctions.set(currentFunc.name, currentFunc);
-                console.log(`Processing function: ${currentFunc.name} from module ${currentFunc.filename}`);
 
                 const childrenInvocations = allInvocations.filter(inv =>
                     inv.caller === currentFunc.baseName && inv.filename === currentFunc.filename
                 );
-                console.log(`  Found ${childrenInvocations.length} invocations from ${currentFunc.name}`);
 
                 for (const inv of childrenInvocations) {
                     stackInvocations.add(inv);
-                    console.log(`    Processing invocation: ${inv.caller} calls ${inv.invoked_function} in module ${inv.invoked_module}`);
 
                     let invokedModuleFilename = null;
 
-                    if (inv.invoked_module === null) { // Call within the same module
+                    if (inv.invoked_module === null) { // Call within the same module (local:)
                         invokedModuleFilename = inv.filename;
-                        console.log(`      Resolved invokedModuleFilename (same module): ${invokedModuleFilename}`);
                     } else if (modulesByFilename.has(inv.invoked_module)) { // invoked_module is already a filename
                         invokedModuleFilename = inv.invoked_module;
-                        console.log(`      Resolved invokedModuleFilename (direct filename): ${invokedModuleFilename}`);
-                    } else { // invoked_module is a prefix, need to resolve via imports
-                        const importMap = importsMap.get(inv.filename); // Imports for the calling module
-                        if (importMap && importMap.has(inv.invoked_module)) {
-                            const importedFilePath = importMap.get(inv.invoked_module);
-                            const importedModule = allModules.find(m => m.filePath === importedFilePath);
-                            if (importedModule) {
-                                invokedModuleFilename = importedModule.filename;
-                                console.log(`      Resolved invokedModuleFilename (via import prefix): ${invokedModuleFilename}`);
-                            } else {
-                                console.log(`      Could not find imported module for filePath: ${importedFilePath}`);
-                            }
+                    } else { // invoked_module is a prefix, need to resolve
+                        const currentModule = modulesByFilename.get(inv.filename);
+                        // Case 1: prefix is the current module's own prefix
+                        if (currentModule && currentModule.prefix === inv.invoked_module) {
+                            invokedModuleFilename = inv.filename;
                         } else {
-                            console.log(`      Could not find import map for module ${inv.filename} or prefix ${inv.invoked_module}`);
+                            // Case 2: prefix is from an imported module
+                            const importMap = importsMap.get(inv.filename);
+                            if (importMap && importMap.has(inv.invoked_module)) {
+                                const importedFilePath = importMap.get(inv.invoked_module);
+                                const importedModule = allModules.find(m => m.filePath === importedFilePath);
+                                if (importedModule) {
+                                    invokedModuleFilename = importedModule.filename;
+                                }
+                            }
                         }
                     }
 
@@ -157,19 +154,13 @@ export default async (req, res) => {
                         const childFuncs = allFunctions.filter(f =>
                             f.filename === invokedModuleFilename && f.baseName === inv.invoked_function
                         );
-                        console.log(`      Found ${childFuncs.length} potential child functions for ${inv.invoked_function} in ${invokedModuleFilename}`);
 
                         for (const childFunc of childFuncs) {
                             if (!visited.has(childFunc.name)) {
                                 visited.add(childFunc.name);
                                 queue.push(childFunc);
-                                console.log(`        Adding child function to queue: ${childFunc.name}`);
-                            } else {
-                                console.log(`        Child function already visited: ${childFunc.name}`);
                             }
                         }
-                    } else {
-                        console.log(`      Skipping invocation due to unresolved invokedModuleFilename for ${inv.invoked_function}`);
                     }
                 }
             }
