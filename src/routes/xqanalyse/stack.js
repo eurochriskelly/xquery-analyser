@@ -54,7 +54,7 @@ export default async (req, res) => {
         });
 
         // 1. Fetch all data from the database
-        const rawFunctions = await dbAll('SELECT * FROM xqy_functions');
+        const rawFunctions = await dbAll('SELECT * FROM extended_xqy_functions');
         const allInvocations = await dbAll('SELECT * FROM xqy_invocations');
         const allModules = await dbAll('SELECT * FROM xqy_modules');
         const allImports = await dbAll('SELECT * FROM xqy_imports');
@@ -182,7 +182,15 @@ export default async (req, res) => {
 
         const callStack = getCallStack(rootFunction);
 
-        res.json(callStack);
+        const finalFunctions = callStack.functions.map(f => {
+            const { baseName, arity, ...rest } = f;
+            return { ...rest, name: baseName };
+        });
+
+        res.json({
+            functions: finalFunctions,
+            invocations: callStack.invocations
+        });
 
     } catch (err) {
         console.error(err);
