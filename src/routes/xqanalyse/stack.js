@@ -76,7 +76,7 @@ export default async (req, res) => {
             const module = modulesByFilename.get(f.filename);
             return {
                 ...f,
-                file: module ? module.filePath : '',
+                file: f.filename, // Use the function's own filename as the logical path
                 baseName: f.name, // Original name without arity
                 name: `${f.name}#${arity}`, // Fully qualified name with arity
                 arity: arity,
