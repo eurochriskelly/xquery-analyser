@@ -68,6 +68,13 @@ export default async (req, res) => {
 
         // 2. Process and enrich the data in the application
         const modulesByFilename = new Map(allModules.map(r => [r.filename, r]));
+        const modulesByPrefix = new Map();
+        allModules.forEach(r => {
+            if (r.prefix) {
+                // This might overwrite if prefixes are not unique, but the last one wins.
+                modulesByPrefix.set(r.prefix, r.filename);
+            }
+        });
         const importsMap = new Map();
         allImports.forEach(row => {
             if (!importsMap.has(row.filename)) {
@@ -151,10 +158,12 @@ export default async (req, res) => {
                             if (importMap && importMap.has(inv.invoked_module)) {
                                 const importedRelativePath = importMap.get(inv.invoked_module);
                                 invokedModuleFilename = resolveRelativePath(inv.filename, importedRelativePath);
+                            } else if (modulesByPrefix.has(inv.invoked_module)) {
+                                invokedModuleFilename = modulesByPrefix.get(inv.invoked_module);
                             } else {
                                 // Fallback: assume invoked_module is a filepath that was not declared.
                                 invokedModuleFilename = inv.invoked_module;
-                                console.warn(`[stack.js] Assumed invoked_module '${inv.invoked_module}' is a filepath for an invocation in '${inv.filename}'`);
+                                console.warn(`[stack.js] Could not resolve prefix '${inv.invoked_module}'. Assuming it is a filepath for an invocation in '${inv.filename}'`);
                             }
                         }
                     }
