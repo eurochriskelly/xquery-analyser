@@ -71,14 +71,15 @@ export default async (req, res) => {
         });
 
         const allFunctions = rawFunctions.map(f => {
-            const parameters = allParameters.filter(p => p.filename === f.filename && p.function_name === f.name);
+            const baseName = f.name.split('#')[0];
+            const parameters = allParameters.filter(p => p.filename === f.filename && p.function_name === baseName);
             const arity = parameters.length;
             const module = modulesByFilename.get(f.filename);
             return {
                 ...f,
                 file: f.filename, // Use the function's own filename as the logical path
-                baseName: f.name, // Original name without arity
-                name: `${f.name}#${arity}`, // Fully qualified name with arity
+                baseName: baseName, // Original name without arity
+                name: `${baseName}#${arity}`, // Fully qualified name with arity
                 arity: arity,
                 parameters: parameters
             };
