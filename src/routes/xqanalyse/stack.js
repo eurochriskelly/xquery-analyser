@@ -72,7 +72,7 @@ export default async (req, res) => {
 
         const allFunctions = rawFunctions.map(f => {
             const baseName = f.name.split('#')[0];
-            const parameters = allParameters.filter(p => p.filename === f.filename && p.function_name === baseName);
+            const parameters = allParameters.filter(p => p.filename === f.filename && p.function_name.split('#')[0] === baseName);
             const arity = parameters.length;
             const module = modulesByFilename.get(f.filename);
             return {
