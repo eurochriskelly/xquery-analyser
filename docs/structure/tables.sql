@@ -46,7 +46,12 @@ CREATE VIEW extended_xqy_functions AS
 SELECT
     f.*,
     (SELECT COUNT(*)
-     FROM xqy_invocations xi 
-     WHERE xi.invoked_function = f.name) AS numInvocations,
+     FROM xqy_invocations xi
+     WHERE xi.invoked_function = (
+        CASE
+            WHEN INSTR(f.name, '#') > 0 THEN SUBSTR(f.name, 1, INSTR(f.name, '#') - 1)
+            ELSE f.name
+        END
+    )) AS numInvocations,
     CASE WHEN f.loc > 0 THEN 1.0 / f.loc ELSE 0 END AS invertedLoc
 FROM xqy_functions f;

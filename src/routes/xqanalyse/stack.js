@@ -151,6 +151,10 @@ export default async (req, res) => {
                             if (importMap && importMap.has(inv.invoked_module)) {
                                 const importedRelativePath = importMap.get(inv.invoked_module);
                                 invokedModuleFilename = resolveRelativePath(inv.filename, importedRelativePath);
+                            } else {
+                                // Fallback: assume invoked_module is a filepath that was not declared.
+                                invokedModuleFilename = inv.invoked_module;
+                                console.warn(`[stack.js] Assumed invoked_module '${inv.invoked_module}' is a filepath for an invocation in '${inv.filename}'`);
                             }
                         }
                     }
