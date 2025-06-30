@@ -53,22 +53,17 @@ export default async (req, res) => {
             });
         });
 
-        // 1. Fetch all data from the database
-        const rawFunctions = await dbAll('SELECT * FROM extended_xqy_functions');
-        const allInvocations = await dbAll('SELECT * FROM xqy_invocations');
+        // --- Pre-load lookup maps (efficient for path resolution) ---
         const allModules = await dbAll('SELECT * FROM xqy_modules');
-        const allImports = await dbAll('SELECT * FROM xqy_imports');
-        const allParameters = await dbAll('SELECT * FROM xqy_parameters');
-
-        // 2. Process and enrich the data in the application
         const modulesByFilename = new Map(allModules.map(r => [r.filename, r]));
         const modulesByPrefix = new Map();
         allModules.forEach(r => {
             if (r.prefix) {
-                // This might overwrite if prefixes are not unique, but the last one wins.
                 modulesByPrefix.set(r.prefix, r.filename);
             }
         });
+
+        const allImports = await dbAll('SELECT * FROM xqy_imports');
         const importsMap = new Map();
         allImports.forEach(row => {
             if (!importsMap.has(row.filename)) {
@@ -77,15 +72,46 @@ export default async (req, res) => {
             importsMap.get(row.filename).set(row.prefix, row.filePath);
         });
 
-        const allFunctions = rawFunctions.map(f => {
-            const baseName = f.name.split('#')[0];
-            const functionParameters = allParameters
-                .filter(p => p.filename === f.filename && p.function_name.split('#')[0] === baseName)
-                .map(p => ({ name: p.parameter, type: p.type }));
-            
-            const arity = functionParameters.length;
+        // --- Iterative Call Stack Traversal ---
+        const stackFunctions = new Map();
+        const stackInvocations = new Set();
+        const queue = [{ filePath: moduleIdentifier, internalName: funcIdentifier }];
+        const visited = new Set();
 
-            return {
+        while (queue.length > 0) {
+            const { filePath, internalName } = queue.shift();
+            const visitedKey = `${filePath}@${internalName}`;
+
+            if (visited.has(visitedKey)) {
+                continue;
+            }
+            visited.add(visitedKey);
+
+            // 1. Get Function Details
+            const [baseName] = internalName.split('#');
+            // The function name in the DB might have an arity or not, so check for both.
+            const funcRows = await dbAll('SELECT * FROM extended_xqy_functions WHERE filename = ? AND (name = ? OR name = ?)', [filePath, baseName, internalName]);
+            
+            if (funcRows.length === 0) {
+                console.warn(`[stack.js] Function ${internalName} in module ${filePath} not found in DB.`);
+                continue;
+            }
+            const f = funcRows[0];
+
+            // The function_name in parameters might have an arity or not.
+            const params = await dbAll('SELECT * FROM xqy_parameters WHERE filename = ? AND (function_name = ? OR function_name = ?)', [filePath, baseName, internalName]);
+            const functionParameters = params.map(p => ({ name: p.parameter, type: p.type }));
+            const arity = functionParameters.length;
+            const actualInternalName = `${baseName}#${arity}`;
+
+            // For the root function, validate that the requested arity was correct.
+            if (stackFunctions.size === 0 && actualInternalName !== funcIdentifier) {
+                return res.status(404).json({ 
+                    error: `Function '${funcIdentifier}' in module '${moduleIdentifier}' not found. Did you mean '${actualInternalName}'?`
+                });
+            }
+
+            const functionObject = {
                 filePath: f.filename,
                 name: baseName,
                 arity: arity,
@@ -95,138 +121,77 @@ export default async (req, res) => {
                 numInvocations: f.numInvocations ? parseInt(f.numInvocations, 10) : 0,
                 invertedLoc: f.invertedLoc,
                 parameters: functionParameters,
-                internal_name: `${baseName}#${arity}`
+                internal_name: actualInternalName
             };
-        });
+            stackFunctions.set(visitedKey, functionObject);
 
-        // 3. Find the root function
-        const rootFunction = allFunctions.find(f =>
-            f.filePath === moduleIdentifier && f.internal_name === funcIdentifier
-        );
+            // 2. Get Invocations for this function
+            const childrenInvocations = await dbAll('SELECT * FROM xqy_invocations WHERE filename = ? AND caller = ?', [filePath, actualInternalName]);
 
-        if (!rootFunction) {
-            const functionsInModule = allFunctions
-                .filter(f => f.filePath === moduleIdentifier)
-                .map(f => f.internal_name);
-            
-            const message = `Function '${funcIdentifier}' in module '${moduleIdentifier}' not found.`;
+            for (const inv of childrenInvocations) {
+                // 3. Resolve invoked module path
+                let invokedModuleFilename = null;
+                const currentModule = modulesByFilename.get(inv.filename);
+                if (inv.invoked_module === null) { // local:
+                    invokedModuleFilename = inv.filename;
+                } else if (modulesByFilename.has(inv.invoked_module)) { // full path
+                    invokedModuleFilename = inv.invoked_module;
+                } else if (currentModule && currentModule.prefix === inv.invoked_module) { // own prefix
+                    invokedModuleFilename = inv.filename;
+                } else { // imported prefix or global prefix
+                    const importMap = importsMap.get(inv.filename);
+                    if (importMap && importMap.has(inv.invoked_module)) {
+                        invokedModuleFilename = importMap.get(inv.invoked_module);
+                    } else if (modulesByPrefix.has(inv.invoked_module)) {
+                        invokedModuleFilename = modulesByPrefix.get(inv.invoked_module);
+                    } else {
+                        invokedModuleFilename = inv.invoked_module;
+                        console.warn(`[stack.js] Could not resolve prefix '${inv.invoked_module}'. Assuming it is a filepath for an invocation in '${inv.filename}'`);
+                    }
+                }
 
-            if (functionsInModule.length > 0) {
-                return res.status(404).json({ 
-                    error: message,
-                    available_functions: functionsInModule
-                });
-            } else {
-                return res.status(404).json({ error: `${message} The module was not found or contains no functions.` });
+                if (invokedModuleFilename) {
+                    // 4. Determine invoked function's arity to build its internal_name
+                    const invokedParams = await dbAll('SELECT parameter FROM xqy_parameters WHERE filename = ? AND function_name = ?', [invokedModuleFilename, inv.invoked_function]);
+                    const invokedArity = invokedParams.length;
+                    const invokedInternalName = `${inv.invoked_function}#${invokedArity}`;
+
+                    stackInvocations.add({
+                        callerInternalName: inv.caller,
+                        invokedInternalName: invokedInternalName
+                    });
+
+                    queue.push({ filePath: invokedModuleFilename, internalName: invokedInternalName });
+                }
             }
         }
 
-        // 4. Build the filtered call stack using a robust traversal algorithm
-        const getCallStack = (rootFunc) => {
-            const stackFunctions = new Map();
-            const stackInvocations = new Set();
-            const queue = [rootFunc];
-            const visited = new Set([rootFunc.internal_name]);
-
-            while (queue.length > 0) {
-                const currentFunc = queue.shift();
-                stackFunctions.set(currentFunc.internal_name, currentFunc);
-
-                const childrenInvocations = allInvocations.filter(inv =>
-                    inv.caller === currentFunc.internal_name && inv.filename === currentFunc.filePath
-                );
-
-                for (const inv of childrenInvocations) {
-                    let invokedModuleFilename = null;
-
-                    if (inv.invoked_module === null) { // Call within the same module (local:)
-                        invokedModuleFilename = inv.filename;
-                    } else if (modulesByFilename.has(inv.invoked_module)) { // invoked_module is already a filename
-                        invokedModuleFilename = inv.invoked_module;
-                    } else { // invoked_module is a prefix, need to resolve
-                        const currentModule = modulesByFilename.get(inv.filename);
-                        if (currentModule && currentModule.prefix === inv.invoked_module) {
-                            invokedModuleFilename = inv.filename;
-                        } else {
-                            const importMap = importsMap.get(inv.filename);
-                            if (importMap && importMap.has(inv.invoked_module)) {
-                                invokedModuleFilename = importMap.get(inv.invoked_module);
-                            } else if (modulesByPrefix.has(inv.invoked_module)) {
-                                invokedModuleFilename = modulesByPrefix.get(inv.invoked_module);
-                            } else {
-                                // Fallback: assume invoked_module is a filepath that was not declared.
-                                invokedModuleFilename = inv.invoked_module;
-                                console.warn(`[stack.js] Could not resolve prefix '${inv.invoked_module}'. Assuming it is a filepath for an invocation in '${inv.filename}'`);
-                            }
-                        }
-                    }
-
-                    if (invokedModuleFilename) {
-                        stackInvocations.add({
-                            callerFilePath: inv.filename,
-                            caller: inv.caller,
-                            invokedFilePath: invokedModuleFilename,
-                            invokedFunction: inv.invoked_function
-                        });
-
-                        const childFuncs = allFunctions.filter(f =>
-                            f.filePath === invokedModuleFilename && f.name === inv.invoked_function
-                        );
-
-                        for (const childFunc of childFuncs) {
-                            if (!visited.has(childFunc.internal_name)) {
-                                visited.add(childFunc.internal_name);
-                                queue.push(childFunc);
-                            }
-                        }
-                    }
-                }
-            }
-
-            return {
-                functions: Array.from(stackFunctions.values()),
-                invocations: Array.from(stackInvocations)
-            };
-        };
-
-        const callStack = getCallStack(rootFunction);
-
-        const finalFunctions = callStack.functions.map(f => {
+        // --- Final Formatting ---
+        const finalFunctions = Array.from(stackFunctions.values()).map(f => {
             const { internal_name, ...rest } = f;
             return rest;
         });
 
-        const finalInvocations = [];
-        for (const inv of callStack.invocations) {
-            const [callerName, callerArityStr] = inv.caller.split('#');
-            const invokedFuncs = allFunctions.filter(f => f.filePath === inv.invokedFilePath && f.name === inv.invokedFunction);
+        const finalInvocations = Array.from(stackInvocations).map(inv => {
+            const [callerName, callerArityStr] = inv.callerInternalName.split('#');
+            const [invokedName, invokedArityStr] = inv.invokedInternalName.split('#');
+            
+            const callerFunc = [...stackFunctions.values()].find(f => f.internal_name === inv.callerInternalName);
+            const invokedFunc = [...stackFunctions.values()].find(f => f.internal_name === inv.invokedInternalName);
 
-            if (invokedFuncs.length > 0) {
-                for (const invokedFunc of invokedFuncs) {
-                    finalInvocations.push({
-                        callerFilePath: inv.callerFilePath,
-                        callerName: callerName,
-                        callerArity: parseInt(callerArityStr, 10),
-                        invokedFilePath: inv.invokedFilePath,
-                        invokedName: invokedFunc.name,
-                        invokedArity: invokedFunc.arity
-                    });
-                }
-            } else {
-                finalInvocations.push({
-                    callerFilePath: inv.callerFilePath,
-                    callerName: callerName,
-                    callerArity: parseInt(callerArityStr, 10),
-                    invokedFilePath: inv.invokedFilePath,
-                    invokedName: inv.invokedFunction,
-                    invokedArity: null
-                });
-            }
-        }
+            return {
+                callerFilePath: callerFunc ? callerFunc.filePath : null,
+                callerName: callerName,
+                callerArity: parseInt(callerArityStr, 10),
+                invokedFilePath: invokedFunc ? invokedFunc.filePath : null,
+                invokedName: invokedName,
+                invokedArity: parseInt(invokedArityStr, 10)
+            };
+        });
 
         res.json({
             functions: finalFunctions,
-            invocations: finalInvocations
+            invocations: finalInvocations.filter(inv => inv.callerFilePath && inv.invokedFilePath) // Filter out incomplete invocations
         });
 
     } catch (err) {
