@@ -120,7 +120,7 @@ export default async (req, res) => {
                 stackFunctions.set(currentFunc.name, currentFunc);
 
                 const childrenInvocations = allInvocations.filter(inv =>
-                    inv.caller === currentFunc.baseName && inv.filename === currentFunc.filename
+                    inv.caller === currentFunc.name && inv.filename === currentFunc.filename
                 );
 
                 for (const inv of childrenInvocations) {
