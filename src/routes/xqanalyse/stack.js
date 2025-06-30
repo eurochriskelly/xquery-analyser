@@ -1,4 +1,3 @@
-import path from 'path';
 import sqlite3 from 'sqlite3';
 import { config } from '../../config.js';
 
@@ -53,11 +52,6 @@ export default async (req, res) => {
                 else resolve(rows);
             });
         });
-
-        const resolveRelativePath = (sourceFilename, relativePath) => {
-            const sourceDir = path.posix.dirname(sourceFilename);
-            return path.posix.resolve(sourceDir, relativePath);
-        };
 
         // 1. Fetch all data from the database
         const rawFunctions = await dbAll('SELECT * FROM extended_xqy_functions');
@@ -156,8 +150,7 @@ export default async (req, res) => {
                         } else {
                             const importMap = importsMap.get(inv.filename);
                             if (importMap && importMap.has(inv.invoked_module)) {
-                                const importedRelativePath = importMap.get(inv.invoked_module);
-                                invokedModuleFilename = resolveRelativePath(inv.filename, importedRelativePath);
+                                invokedModuleFilename = importMap.get(inv.invoked_module);
                             } else if (modulesByPrefix.has(inv.invoked_module)) {
                                 invokedModuleFilename = modulesByPrefix.get(inv.invoked_module);
                             } else {
