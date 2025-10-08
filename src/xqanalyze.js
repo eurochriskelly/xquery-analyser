@@ -1,6 +1,6 @@
 console.log('xqanalyze build @@BUILD_TIME@@');
 
-const { exec } = require('child_process');
+const { exec, spawn } = require('child_process');
 
 const args = process.argv.slice(2);
 const dbFile = '/tmp/xqanalyze/xqy.sqlite';
@@ -43,12 +43,15 @@ if (args.includes('--init')) {
   });
 } else {
   // Interactive mode
-  exec(`node "${buildStackScript}" --db "${dbFile}" --interactive`, baseExecOptions, (error, stdout, stderr) => {
-    if (error) {
-      console.error(`Error: ${error}`);
-      console.error(stderr);
-      process.exit(1);
-    }
-    console.log(stdout);
+  const child = spawn('node', [`${buildStackScript}`, '--db', `${dbFile}`, '--interactive'], {
+    ...baseExecOptions,
+    stdio: 'inherit'
+  });
+  child.on('error', (error) => {
+    console.error(`Error: ${error}`);
+    process.exit(1);
+  });
+  child.on('exit', (code) => {
+    process.exit(code);
   });
 }
