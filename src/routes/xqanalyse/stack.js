@@ -88,9 +88,9 @@ export default async (req, res) => {
             visited.add(visitedKey);
 
             // 1. Get Function Details
-            const [baseName] = internalName.split('#');
-            // The function name in the DB might have an arity or not, so check for both.
-            const funcRows = await dbAll('SELECT * FROM extended_xqy_functions WHERE filename = ? AND (name = ? OR name = ?)', [filePath, baseName, internalName]);
+            // The internalName should be exactly what's in the database
+            console.log(`Executing query: SELECT * FROM extended_xqy_functions WHERE filename = '${filePath}' AND name = '${internalName}'`);
+            const funcRows = await dbAll('SELECT * FROM extended_xqy_functions WHERE filename = ? AND name = ?', [filePath, internalName]);
             
             if (funcRows.length === 0) {
                 console.warn(`[stack.js] Function ${internalName} in module ${filePath} not found in DB.`);
@@ -98,18 +98,27 @@ export default async (req, res) => {
             }
             const f = funcRows[0];
 
-            // The function_name in parameters might have an arity or not.
-            const params = await dbAll('SELECT * FROM xqy_parameters WHERE filename = ? AND (function_name = ? OR function_name = ?)', [filePath, baseName, internalName]);
+            // The function_name in parameters should match exactly
+            const params = await dbAll('SELECT * FROM xqy_parameters WHERE filename = ? AND function_name = ?', [filePath, internalName]);
             const functionParameters = params.map(p => ({ name: p.parameter, type: p.type }));
             const arity = functionParameters.length;
             const actualInternalName = `${baseName}#${arity}`;
 
+            // Build qualified function name for invocation queries (this should match what's in the DB)
+            const currentModule = modulesByFilename.get(filePath);
+            const prefix = currentModule ? currentModule.prefix : '';
+            const qualifiedFunction = prefix ? `${prefix}:${actualInternalName}` : actualInternalName;
+
             // For the root function, validate that the requested arity was correct.
-            if (stackFunctions.size === 0 && actualInternalName !== funcIdentifier) {
+            if (stackFunctions.size === 0 && qualifiedFunction !== funcIdentifier) {
                 return res.status(404).json({ 
-                    error: `Function '${funcIdentifier}' in module '${moduleIdentifier}' not found. Did you mean '${actualInternalName}'?`
+                    error: `Function '${funcIdentifier}' in module '${moduleIdentifier}' not found. Did you mean '${qualifiedFunction}'?`
                 });
             }
+
+            // 2. Get Invocations for this function - use qualifiedFunction to match DB
+            const childrenInvocations = await dbAll('SELECT * FROM xqy_invocations WHERE filename = ? AND caller = ?', [filePath, qualifiedFunction]);
+            console.log(childrenInvocations.length > 0 ? `Found ${childrenInvocations.length} invocations for ${qualifiedFunction}` : `No invocations found for ${qualifiedFunction}`);
 
             const functionObject = {
                 filePath: f.filename,
@@ -118,15 +127,12 @@ export default async (req, res) => {
                 line: f.line ? parseInt(f.line, 10) : null,
                 private: f.private === 1,
                 loc: f.loc ? parseInt(f.loc, 10) : null,
-                numInvocations: f.numInvocations ? parseInt(f.numInvocations, 10) : 0,
+                numInvocations: childrenInvocations.length, // Use actual invocations found, not DB field
                 invertedLoc: f.invertedLoc,
                 parameters: functionParameters,
                 internal_name: actualInternalName
             };
             stackFunctions.set(visitedKey, functionObject);
-
-            // 2. Get Invocations for this function
-            const childrenInvocations = await dbAll('SELECT * FROM xqy_invocations WHERE filename = ? AND caller = ?', [filePath, actualInternalName]);
 
             for (const inv of childrenInvocations) {
                 // 3. Resolve invoked module path
@@ -155,13 +161,18 @@ export default async (req, res) => {
                     const invokedParams = await dbAll('SELECT parameter FROM xqy_parameters WHERE filename = ? AND function_name = ?', [invokedModuleFilename, inv.invoked_function]);
                     const invokedArity = invokedParams.length;
                     const invokedInternalName = `${inv.invoked_function}#${invokedArity}`;
+                    
+                    // Build qualified function name for the invoked function
+                    const invokedModule = modulesByFilename.get(invokedModuleFilename);
+                    const invokedPrefix = invokedModule ? invokedModule.prefix : '';
+                    const qualifiedInvokedFunction = invokedPrefix ? `${invokedPrefix}:${invokedInternalName}` : invokedInternalName;
 
                     stackInvocations.add({
                         callerInternalName: inv.caller,
-                        invokedInternalName: invokedInternalName
+                        invokedInternalName: qualifiedInvokedFunction
                     });
 
-                    queue.push({ filePath: invokedModuleFilename, internalName: invokedInternalName });
+                    queue.push({ filePath: invokedModuleFilename, internalName: qualifiedInvokedFunction });
                 }
             }
         }
@@ -173,11 +184,21 @@ export default async (req, res) => {
         });
 
         const finalInvocations = Array.from(stackInvocations).map(inv => {
-            const [callerName, callerArityStr] = inv.callerInternalName.split('#');
-            const [invokedName, invokedArityStr] = inv.invokedInternalName.split('#');
+            // Handle qualified names that might have prefixes
+            const callerParts = inv.callerInternalName.split(':');
+            const callerNameWithArity = callerParts.length > 1 ? callerParts[1] : inv.callerInternalName;
+            const [callerName, callerArityStr] = callerNameWithArity.split('#');
             
-            const callerFunc = [...stackFunctions.values()].find(f => f.internal_name === inv.callerInternalName);
-            const invokedFunc = [...stackFunctions.values()].find(f => f.internal_name === inv.invokedInternalName);
+            const invokedParts = inv.invokedInternalName.split(':');
+            const invokedNameWithArity = invokedParts.length > 1 ? invokedParts[1] : inv.invokedInternalName;
+            const [invokedName, invokedArityStr] = invokedNameWithArity.split('#');
+            
+            // Find functions by their internal_name (without prefix)
+            const callerInternalName = `${callerName}#${callerArityStr}`;
+            const invokedInternalName = `${invokedName}#${invokedArityStr}`;
+            
+            const callerFunc = [...stackFunctions.values()].find(f => f.internal_name === callerInternalName);
+            const invokedFunc = [...stackFunctions.values()].find(f => f.internal_name === invokedInternalName);
 
             return {
                 callerFilePath: callerFunc ? callerFunc.filePath : null,
