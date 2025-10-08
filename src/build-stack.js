@@ -228,12 +228,14 @@ async function buildCallStack(selectedModule, selectedFunction) {
             calling_id: current.id,
             isCycle: isInAncestorChain(current.id, B, calledFunction)
           });
-          nodes.set(newId, {
-            label: newLabel,
-            level: current.level + 1,
-            function: calledFunction,
-            filename: B
-          });
+           nodes.set(newId, {
+             label: newLabel,
+             level: current.level + 1,
+             function: calledFunction,
+             filename: B,
+             loc: null,
+             invertedLoc: null
+           });
           nodeMap.set(newId, { filename: B, function: calledFunction, calling_id: current.id });
           functionCallCounts.set(calledFunction, (functionCallCounts.get(calledFunction) || 0) + 1);
           continue;
@@ -241,6 +243,8 @@ async function buildCallStack(selectedModule, selectedFunction) {
 
         const calledFunction = `${P_B}:${F}`;
         const isCycle = isInAncestorChain(current.id, B, calledFunction);
+        const locRows = await dbAll('SELECT loc FROM extended_xqy_functions WHERE filename = ? AND name = ?', [B, F]);
+        const loc = locRows.length > 0 ? locRows[0].loc : null;
         const newId = ++idCounter;
         const newBaseName = getBaseFilename(B);
         const newLabel = `${newBaseName}/${F}`;
@@ -256,7 +260,9 @@ async function buildCallStack(selectedModule, selectedFunction) {
           label: newLabel,
           level: current.level + 1,
           function: calledFunction,
-          filename: B
+          filename: B,
+          loc: loc,
+          invertedLoc: null
         });
         nodeMap.set(newId, { filename: B, function: calledFunction, calling_id: current.id });
         functionCallCounts.set(calledFunction, (functionCallCounts.get(calledFunction) || 0) + 1);
@@ -301,11 +307,19 @@ async function buildCallStack(selectedModule, selectedFunction) {
 
    // Build stack text
    const rootId = Array.from(nodes.keys()).find(id => nodes.get(id).level === 0);
-   function buildStackText(nodeId, indent = 0, visited = new Set()) {
-     if (visited.has(nodeId)) return ''; // Avoid cycles
+   function buildStackText(nodeId, indent, visited) {
+     if (typeof visited === 'undefined') visited = new Set();
+     if (typeof indent === 'undefined') indent = 0;
+     if (visited.has(nodeId)) return '';
      visited.add(nodeId);
      const node = nodes.get(nodeId);
-     let text = '  '.repeat(indent) + node.label + '\n';
+     const levelStr = ('0' + node.level).slice(-2);
+     const indentStr = '  '.repeat(indent);
+     let label = node.label;
+     if (node.loc) {
+       label += `:${node.loc}`;
+     }
+     let text = `${levelStr} ${indentStr}${label}\n`;
      const children = edges.filter(e => e.source === nodeId).map(e => e.target);
      for (const childId of children) {
        text += buildStackText(childId, indent + 1, new Set(visited));
