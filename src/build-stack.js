@@ -45,8 +45,14 @@ const importsMap = new Map();
 const nodeMap = new Map();
 const functionCallCounts = new Map();
 
-// Function to extract base filename without path or extension
+// Function to extract base filename without path or extension, relative to ml-modules
 function getBaseFilename(filename) {
+  const mlModules = 'ml-modules/';
+  const idx = filename.indexOf(mlModules);
+  if (idx !== -1) {
+    const rel = filename.slice(idx + mlModules.length);
+    return path.basename(rel, '.xqy');
+  }
   return path.basename(filename, '.xqy');
 }
 
@@ -291,11 +297,28 @@ async function buildCallStack(selectedModule, selectedFunction) {
   edges.forEach(edge => {
     gmlContent += `  edge [\n    source ${edge.source}\n    target ${edge.target}\n  ]\n`;
   });
-  gmlContent += ']\n';
+   gmlContent += ']\n';
 
-  fs.writeFileSync('output.gml', gmlContent);
-  console.log('Generated output.gml');
-  db.close();
+   // Build stack text
+   const rootId = Array.from(nodes.keys()).find(id => nodes.get(id).level === 0);
+   function buildStackText(nodeId, indent = 0, visited = new Set()) {
+     if (visited.has(nodeId)) return ''; // Avoid cycles
+     visited.add(nodeId);
+     const node = nodes.get(nodeId);
+     let text = '  '.repeat(indent) + node.label + '\n';
+     const children = edges.filter(e => e.source === nodeId).map(e => e.target);
+     for (const childId of children) {
+       text += buildStackText(childId, indent + 1, new Set(visited));
+     }
+     return text;
+   }
+   const stackText = buildStackText(rootId);
+   fs.writeFileSync('output.stack', stackText);
+   console.log(`Generated ${path.resolve('output.stack')}`);
+
+   fs.writeFileSync('output.gml', gmlContent);
+   console.log(`Generated ${path.resolve('output.gml')}`);
+   db.close();
 }
 
 // Main execution
