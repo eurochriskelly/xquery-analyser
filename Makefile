@@ -6,6 +6,7 @@ BINDIR ?= $(PREFIX)/bin
 SRCDIR ?= src
 EXECUTABLE ?= xqanalyze
 REPO_DIR := $(shell pwd)
+BUILD_TIME := $(shell date +%s)
 
 # Help target
 .DEFAULT_GOAL := help
@@ -16,19 +17,21 @@ help:  ## Show this help message
 all: install  ## Alias for install target
 
 install:  ## Install the executable
-	@echo "Replacing @@REPO_DIR@@ with the current directory path..."
-	@sed 's|@@REPO_DIR@@|$(REPO_DIR)|g' $(SRCDIR)/$(EXECUTABLE)-worker.sh > /tmp/$(EXECUTABLE)-worker_tmp
-	@chmod +x /tmp/$(EXECUTABLE)-worker_tmp
+	@echo "Creating executable script..."
+	@echo '#!/usr/bin/env node' > /tmp/$(EXECUTABLE)_tmp
+	@echo 'const originalCwd = process.cwd(); process.chdir("$(REPO_DIR)");' >> /tmp/$(EXECUTABLE)_tmp
+	@sed -e 's|@@REPO_DIR@@|$(REPO_DIR)|g' -e 's|@@BUILD_TIME@@|$(BUILD_TIME)|g' $(SRCDIR)/$(EXECUTABLE).js >> /tmp/$(EXECUTABLE)_tmp
+	@chmod +x /tmp/$(EXECUTABLE)_tmp
 	@SUDO=; \
 	if [ ! -w $(DESTDIR)$(BINDIR) ]; then \
 		SUDO=sudo; \
 	fi; \
-	echo "Copying $(EXECUTABLE)-worker to $(DESTDIR)$(BINDIR)..."; \
+	echo "Copying $(EXECUTABLE) to $(DESTDIR)$(BINDIR)..."; \
 	$$SUDO install -d $(DESTDIR)$(BINDIR); \
-	$$SUDO install -m 755 /tmp/$(EXECUTABLE)-worker_tmp $(DESTDIR)$(BINDIR)/$(EXECUTABLE)-worker; \
+	$$SUDO install -m 755 /tmp/$(EXECUTABLE)_tmp $(DESTDIR)$(BINDIR)/$(EXECUTABLE); \
 	echo "Cleaning up temporary files..."; \
-	rm -f /tmp/$(EXECUTABLE)-worker_tmp; \
-	echo "Installation complete: $(DESTDIR)$(BINDIR)/$(EXECUTABLE)-worker"
+	rm -f /tmp/$(EXECUTABLE)_tmp; \
+	echo "Installation complete: $(DESTDIR)$(BINDIR)/$(EXECUTABLE)"
 
 clean:  ## Clean build artifacts (no-op)
 	@echo "Nothing to clean"

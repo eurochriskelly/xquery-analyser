@@ -1,10 +1,25 @@
 #!/bin/bash
 
-export REPO_DIR="@@REPO_DIR@@"
+BUILD_TIME=${BUILD_TIME:-$(date +%s)}
+echo "xqanalyze build ${BUILD_TIME}"
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+export REPO_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
 # DB_FILE is now passed as the second argument to the script
 DB_FILE=$2
+WORKING_DIR="${WORKING_DIR:-$PWD}"
 
-hh "DEBUG: xqanalyze-worker.sh received DB_FILE as: $DB_FILE"
+if [ ! -d "$WORKING_DIR" ]; then
+  echo "Provided WORKING_DIR '$WORKING_DIR' does not exist." >&2
+  exit 1
+fi
+
+# Create a function to print a message in red with a timestamp prepended
+hh() {
+  echo -e "\033[33m$(date +%H:%M:%S) $1\033[0m"
+}
+
+hh "DEBUG: xqanalyze received DB_FILE as: $DB_FILE"
 
 # Check if a temporary directory is provided as an argument
 if [ -n "$3" ]; then
@@ -15,7 +30,7 @@ else
 fi
 
 main() {
-  hh "Running xqanalyze-worker with DB_FILE: $DB_FILE"
+  hh "Running xqanalyze with DB_FILE: $DB_FILE"
 
   case $1 in
   --extract-functions | -x)
@@ -85,25 +100,26 @@ extract_all_functions() {
   mkdir -p $tdir
   gen_file_list
   i=1
-  for f in $(cat $tdir/xqyfiles.txt); do
+  while IFS= read -r f; do
+    [ -z "$f" ] && continue
     hh "${i}: Processing file: $f"
     node $REPO_DIR/src/extract-functions.js \
-      --file-name=$f \
+      --file-name="$f" \
       --out-dir=$tdir
     i=$((i + 1))
-  done
+  done <"$tdir/xqyfiles.txt"
 }
 
 extract_functions() {
   hh "Extracting functions"
   local file=$1
-  node $REPO_DIR/src/extract-functions.js --file-name=$file
+  node $REPO_DIR/src/extract-functions.js --file-name="$file"
 }
 
 import_checks() {
   hh "Running import checks. Database will be created at: $DB_FILE"
   gen_file_list
-  rm "$tdir"/*.csv
+  rm -f "$tdir"/*.csv
   test -f "$DB_FILE" && rm "$DB_FILE" # Ensure DB_FILE is quoted
   check_for_import_names
   generate_import_db
@@ -181,8 +197,10 @@ EOF
 }
 
 gen_file_list() {
-  hh "Generating file list from current directory using find"
-  find . -name "*.xqy" >"$tdir/xqyfiles.txt"
+  hh "Generating file list from working directory using find"
+  hh "Working directory: $WORKING_DIR"
+  find "$WORKING_DIR" \( -name "*.xqy" -o -name "*.xq" \) >"$tdir/xqyfiles.txt"
+  hh "Files found: $(wc -l <"$tdir/xqyfiles.txt")"
 }
 extract_functions() {
   local file=$1
@@ -240,18 +258,14 @@ generate_import_db() {
 
 check_for_import_names() {
   getmods() {
-    for f in $(cat "$tdir/xqyfiles.txt"); do
-      cat "$f" | grep "^module namespace" | awk '{print $3}' | awk -F= '{print $1}'
-    done
+    while IFS= read -r f; do
+      [ -z "$f" ] && continue
+      grep "^module namespace" "$f" | awk '{print $3}' | awk -F= '{print $1}'
+    done <"$tdir/xqyfiles.txt"
   }
   hh "Found the following module namespaces:"
   getmods | sort | uniq -c | while read count name; do
     hh "  $name ($count instances)"
   done
 }
-# Create a function to print a message in red with a timestamp prepended
-hh() {
-  echo -e "\033[33m$(date +%H:%M:%S) $1\033[0m"
-}
-
 main $@
